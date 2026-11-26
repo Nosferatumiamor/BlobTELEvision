@@ -330,7 +330,7 @@ function updateEmptyHint() {
   if (!engineUp) {
     emptyHintEl.textContent = "Waiting for the engine...";
   } else if (!modelReady(kind)) {
-    emptyHintEl.textContent = "Install the model weights first (panel above).";
+    emptyHintEl.textContent = "Install the model weights first.";
   } else if (kind === "i2v" && !uploadId) {
     emptyHintEl.textContent = "Pick a source image, write a prompt, hit DEGENERATE.";
   } else {
@@ -798,15 +798,25 @@ abortBtn.addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------- gallery
-async function refreshGallery() {
-  let items: { filename: string; output_url: string }[];
-  try {
-    items = await fetchJson("/outputs/recent?limit=40");
-  } catch {
-    return;
-  }
+const VHS_SVG =
+  '<svg viewBox="0 0 64 40" width="64" height="40" aria-hidden="true">' +
+  '<rect x="2" y="2" width="60" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/>' +
+  '<rect x="9" y="7" width="46" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>' +
+  '<line x1="14" y1="11" x2="38" y2="11" stroke="currentColor" stroke-width="2"/>' +
+  '<line x1="14" y1="15" x2="30" y2="15" stroke="currentColor" stroke-width="2"/>' +
+  '<path d="M17 38 L21 27 H43 L47 38" fill="none" stroke="currentColor" stroke-width="2"/>' +
+  '<circle cx="25" cy="32" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>' +
+  '<circle cx="39" cy="32" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>' +
+  "</svg>";
+
+const GALLERY_SLOT_WIDTH = 158; // card width + gap, keep in sync with .gallery-item in style.css
+let galleryItems: { filename: string; output_url: string }[] = [];
+
+// Real videos first, then empty VHS slots until the row spans the full width.
+function renderGallery() {
   galleryEl.innerHTML = "";
-  for (const it of items) {
+  const activeUrl = outputVideoEl.hidden ? "" : new URL(outputVideoEl.src, location.href).pathname;
+  for (const it of galleryItems) {
     const card = document.createElement("div");
     card.className = "gallery-item";
     card.dataset.url = it.output_url;
@@ -820,11 +830,30 @@ async function refreshGallery() {
     card.addEventListener("click", () => {
       if (!generating) showVideo(it.output_url);
     });
+    if (activeUrl && activeUrl === it.output_url) card.classList.add("active");
     galleryEl.appendChild(card);
+  }
+  const slots = Math.max(galleryItems.length, Math.floor((galleryEl.clientWidth + 8) / GALLERY_SLOT_WIDTH));
+  for (let i = galleryItems.length; i < slots; i++) {
+    const empty = document.createElement("div");
+    empty.className = "gallery-item gallery-empty";
+    empty.innerHTML = VHS_SVG;
+    galleryEl.appendChild(empty);
   }
 }
 
+async function refreshGallery() {
+  try {
+    galleryItems = await fetchJson("/outputs/recent?limit=40");
+  } catch {
+    return;
+  }
+  renderGallery();
+}
+window.addEventListener("resize", () => renderGallery());
+
 // ---------------------------------------------------------------- boot
 applyMode();
+renderGallery(); // empty VHS slots right away, real videos fill in once the engine answers
 void initFastBoot();
 void waitForEngine();

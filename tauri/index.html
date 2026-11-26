@@ -81,32 +81,33 @@
 
       <!-- CENTER: the television -->
       <section id="stage">
-        <div id="models-panel" class="panel" hidden>
-          <p class="panel-title">Model weights not installed</p>
-          <p class="field-hint">
-            BlobTELEvision never downloads anything on its own. Tick what you want, then download.
-            Image → video is optional.
-          </p>
-          <label class="checkbox-field models-row">
-            <input id="cb-t2v" type="checkbox" checked />
-            <span>ModelScope text-to-video, 1.7B (~3.7 GB)</span>
-            <span id="progress-t2v" class="models-row-progress"></span>
-          </label>
-          <label class="checkbox-field models-row">
-            <input id="cb-i2v" type="checkbox" />
-            <span>I2VGen-XL image-to-video (~5 GB)</span>
-            <span id="progress-i2v" class="models-row-progress"></span>
-          </label>
-          <button id="models-install-btn" type="button">Download selected</button>
-          <p id="models-install-status" class="field-hint" hidden></p>
-        </div>
-
         <div id="tv">
           <div id="tv-bezel">
             <div id="output-box">
               <div id="output-empty">
                 <p class="empty-title">Nothing on the air</p>
                 <p class="field-hint" id="empty-hint">Write a prompt and hit DEGENERATE.</p>
+              </div>
+
+              <!-- Shown inside the screen until the text-to-video weights are installed. -->
+              <div id="models-panel" hidden>
+                <p class="empty-title">Model weights not installed</p>
+                <p class="field-hint">
+                  BlobTELEvision never downloads anything on its own. Tick what you want, then download.
+                  Image → video is optional.
+                </p>
+                <label class="checkbox-field models-row">
+                  <input id="cb-t2v" type="checkbox" checked />
+                  <span class="models-row-name">ModelScope text-to-video, 1.7B (~3.7 GB)</span>
+                  <span id="progress-t2v" class="models-row-progress"></span>
+                </label>
+                <label class="checkbox-field models-row">
+                  <input id="cb-i2v" type="checkbox" />
+                  <span class="models-row-name">I2VGen-XL image-to-video (~5 GB)</span>
+                  <span id="progress-i2v" class="models-row-progress"></span>
+                </label>
+                <button id="models-install-btn" type="button">Download selected</button>
+                <p id="models-install-status" class="field-hint" hidden></p>
               </div>
 
               <!-- Shown inside the screen while the Python environment is being built. -->
@@ -140,11 +141,6 @@
         </div>
 
         <pre id="job-log" hidden></pre>
-
-        <div id="gallery-head">
-          <span class="field-label">Recent videos</span>
-        </div>
-        <div id="gallery"></div>
       </section>
 
       <!-- RIGHT: how to make it -->
@@ -208,6 +204,12 @@
         </div>
       </aside>
     </main>
+
+    <!-- Full-width shelf of recent videos; empty slots show a grey VHS tape. -->
+    <section id="gallery-bar">
+      <span class="field-label">Recent videos</span>
+      <div id="gallery"></div>
+    </section>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
