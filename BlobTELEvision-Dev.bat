@@ -29,14 +29,13 @@ if not exist node_modules (
     )
 )
 
-REM The real run happens in a hidden console, so no black window stays on the
-REM desktop while the app is open. Its output goes to logs\dev.log, which is
-REM only opened if the build or the app fails.
-echo  Lancement... la fenetre de l'app apparait dans 1 a 2 minutes (compilation).
-echo  Log : logs\dev.log
-set "SELF=%~f0"
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -WindowStyle Hidden -ArgumentList '/c', ('\"' + $env:SELF + '\" --child')"
-ping -n 5 127.0.0.1 >nul
+REM The real run happens in a hidden console (output -> logs\dev.log) so no black
+REM window stays on the desktop while the app is open. This console stays visible,
+REM streaming the build, until the app window (splash screen) appears.
+echo  Lancement...
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\scripts\dev_launch.ps1" -Self "%~f0" -Log "%~dp0logs\dev.log"
+if errorlevel 1 pause
 exit /b 0
 
 :child
