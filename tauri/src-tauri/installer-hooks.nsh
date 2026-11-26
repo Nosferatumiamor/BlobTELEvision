@@ -50,6 +50,10 @@ Click OK to continue installing." /SD IDOK
     ; Only our own folders, by name: the install folder may be shared with something else.
     ${If} ${FileExists} "$INSTDIR\venv\.bootstrap_complete"
     ${OrIf} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
+      ; site-packages has paths longer than the 260 chars NSIS' RMDir can handle in a deep install
+      ; folder: cmd's rmdir with the \\?\ prefix does, RMDir /r then cleans up whatever is left.
+      nsExec::Exec 'cmd.exe /c rmdir /s /q "\\?\$INSTDIR\venv"'
+      Pop $0
       RMDir /r "$INSTDIR\venv"
     ${EndIf}
     RMDir /r "$INSTDIR\models\modelscope-t2v"

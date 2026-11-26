@@ -48,7 +48,10 @@ screen is the progress bar, and the little red LED is on whenever the engine is 
 > slow. The installer itself is tiny: it only contains the app, everything else is downloaded when you first
 > open it, and you can follow it live on the TV screen. Every launch after that is much quicker.
 
-1. Install and launch.
+1. Download the installer from the [Releases page](https://github.com/Nosferatumiamor/BlobTELEvision/releases), run it, then launch the app.
+   The installer is not code-signed, so Windows SmartScreen may show an "unrecognized app" warning: click
+   *More info*, then *Run anyway*. You can pick the install folder. Uninstalling offers to remove the downloaded
+   Python environment and models too (your videos are kept unless you say otherwise).
 2. The app asks which model weights you want. Text to video is about 3.7 GB, image to video about 5 GB more.
    Nothing is downloaded without you ticking it. The **Models** button in the header brings the panel back
    whenever you want to add or uninstall one.
