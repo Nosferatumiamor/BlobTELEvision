@@ -400,11 +400,31 @@ fn open_outputs_folder() -> Result<(), String> {
     Ok(())
 }
 
+// Opens a link from the About dialog in the system's default browser. Left
+// to the webview, a click would navigate the app window itself away from the
+// UI. Only plain https:// URLs are accepted, and the URL is handed to
+// explorer.exe as one argument (no shell involved), so nothing in it can be
+// interpreted as a command.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let ok = url.starts_with("https://")
+        && !url.chars().any(|c| c.is_whitespace() || c == '"' || c == '<' || c == '>');
+    if !ok {
+        return Err("Only plain https:// links can be opened.".to_string());
+    }
+    Command::new("explorer")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            open_external,
             open_outputs_folder,
             read_bootstrap_log,
             get_fast_boot,

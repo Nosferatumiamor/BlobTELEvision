@@ -17,7 +17,7 @@
         <img src="/src/blob-logo.png" alt="" class="blob-logo" />
         <div>
           <h1>BlobTELEvision</h1>
-          <p class="tagline">Retro AI Video Slop Emulator</p>
+          <p class="tagline">Retro AI Videslop Emulator</p>
         </div>
       </div>
       <div id="top-bar-right">
@@ -30,6 +30,7 @@
           Fast reboot
         </label>
         <div id="engine-status" class="status status-pending">Checking engine...</div>
+        <button id="about-btn" type="button" class="menu-btn" title="About, credits and licenses">ⓘ About</button>
       </div>
     </header>
 
@@ -39,8 +40,8 @@
         <div class="field">
           <span class="field-label">Mode</span>
           <div class="radio-row" id="mode-radio">
-            <label><input type="radio" name="mode" value="t2v" checked /> text → video</label>
-            <label><input type="radio" name="mode" value="i2v" /> image → video</label>
+            <label><input type="radio" name="mode" value="t2v" checked /> text → videslop</label>
+            <label><input type="radio" name="mode" value="i2v" /> image → videslop</label>
           </div>
           <p class="field-hint" id="mode-blurb"></p>
         </div>
@@ -94,7 +95,7 @@
                 <p class="empty-title">Model weights not installed</p>
                 <p class="field-hint">
                   BlobTELEvision never downloads anything on its own. Tick what you want, then download.
-                  Image → video is optional.
+                  Image → videslop is optional.
                 </p>
                 <label class="checkbox-field models-row">
                   <input id="cb-t2v" type="checkbox" checked />
@@ -205,15 +206,109 @@
       </aside>
     </main>
 
-    <!-- Full-width shelf of recent videos; empty slots show a grey VHS tape. -->
+    <!-- Full-width shelf of recent videslops; empty slots show a grey VHS tape. -->
     <section id="gallery-bar">
-      <span class="field-label">Recent videos</span>
+      <span class="field-label">Recent videslops</span>
       <div id="gallery-wrap">
         <button id="gallery-prev" class="gallery-arrow" type="button" aria-label="Scroll left" hidden>‹</button>
         <div id="gallery"></div>
         <button id="gallery-next" class="gallery-arrow" type="button" aria-label="Scroll right" hidden>›</button>
       </div>
     </section>
+
+    <div id="about-overlay" hidden>
+      <div id="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
+        <div id="about-head">
+          <h2 id="about-title">About BlobTELEvision</h2>
+          <button id="about-close" type="button" class="menu-btn" aria-label="Close">✕</button>
+        </div>
+
+        <div id="about-body">
+          <section>
+            <h3>Who made this</h3>
+            <p>
+              BlobTELEvision was imagined by <strong>GROM - Nosferatumiamor</strong> and vibe-coded with
+              <strong>Claude</strong> by <a href="https://www.anthropic.com" data-ext>Anthropic</a>. It is the little
+              brother of <a href="https://github.com/Nosferatumiamor/BlobVision" data-ext>BlobVision</a>.
+              It works on my machine, it comes with no guarantee whatsoever.
+            </p>
+            <p>
+              More projects:
+              <a href="https://github.com/Nosferatumiamor" data-ext>github.com/Nosferatumiamor</a>
+            </p>
+          </section>
+
+          <section>
+            <h3>Models (downloaded on demand, they keep their own licenses)</h3>
+            <table class="about-table">
+              <thead><tr><th>Model</th><th>Made by</th><th>License</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><a href="https://huggingface.co/damo-vilab/text-to-video-ms-1.7b" data-ext>ModelScope text-to-video 1.7B</a></td>
+                  <td>DAMO Vision Intelligence Lab, Alibaba</td>
+                  <td>CC BY-NC 4.0<br /><span class="about-warn">non-commercial use only</span></td>
+                </tr>
+                <tr>
+                  <td><a href="https://huggingface.co/ali-vilab/i2vgen-xl" data-ext>I2VGen-XL</a></td>
+                  <td>Alibaba (ali-vilab)</td>
+                  <td>MIT</td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/xinntao/Real-ESRGAN" data-ext>Real-ESRGAN</a> x2plus / x4plus <span class="about-opt">(Redux, optional)</span></td>
+                  <td>Xintao Wang et al.</td>
+                  <td>BSD-3-Clause</td>
+                </tr>
+                <tr>
+                  <td><a href="https://github.com/nihui/rife-ncnn-vulkan" data-ext>RIFE ncnn Vulkan</a> <span class="about-opt">(Redux, optional)</span></td>
+                  <td>RIFE: Zhewei Huang et al.<br />ncnn build: nihui</td>
+                  <td>MIT</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h3>Tools and libraries</h3>
+            <table class="about-table">
+              <thead><tr><th>Project</th><th>By</th><th>License</th></tr></thead>
+              <tbody>
+                <tr><td><a href="https://pytorch.org" data-ext>PyTorch</a></td><td>PyTorch Foundation</td><td>BSD-3-Clause</td></tr>
+                <tr><td><a href="https://github.com/huggingface/diffusers" data-ext>diffusers</a>, <a href="https://github.com/huggingface/transformers" data-ext>transformers</a>, huggingface_hub, accelerate, safetensors</td><td>Hugging Face</td><td>Apache-2.0</td></tr>
+                <tr><td><a href="https://github.com/chaiNNer-org/spandrel" data-ext>spandrel</a></td><td>chaiNNer team</td><td>MIT</td></tr>
+                <tr><td><a href="https://github.com/fastapi/fastapi" data-ext>FastAPI</a></td><td>Sebastián Ramírez</td><td>MIT</td></tr>
+                <tr><td><a href="https://github.com/encode/uvicorn" data-ext>uvicorn</a></td><td>Encode</td><td>BSD-3-Clause</td></tr>
+                <tr><td><a href="https://github.com/imageio/imageio" data-ext>ImageIO</a> + imageio-ffmpeg</td><td>ImageIO contributors</td><td>BSD-2-Clause<br /><span class="about-opt">bundled FFmpeg: its own LGPL/GPL terms</span></td></tr>
+                <tr><td>Pillow, NumPy</td><td>their contributors</td><td>HPND, BSD-3-Clause</td></tr>
+                <tr><td><a href="https://tauri.app" data-ext>Tauri</a></td><td>Tauri Programme</td><td>MIT or Apache-2.0</td></tr>
+                <tr><td><a href="https://github.com/astral-sh/uv" data-ext>uv</a> (installs the Python environment)</td><td>Astral</td><td>MIT or Apache-2.0</td></tr>
+                <tr><td><a href="https://www.python.org" data-ext>Python</a></td><td>Python Software Foundation</td><td>PSF License</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h3>Thanks</h3>
+            <p>
+              To the DAMO Academy and ali-vilab teams for the models that started the whole spaghetti era,
+              to the Real-ESRGAN, RIFE and ncnn authors for the Redux tools, to Hugging Face for hosting the
+              weights and the diffusers library, and to everyone who ever watched a man eat spaghetti with
+              a face that had given up. And to you for using it: say hi at
+              <a href="https://github.com/Nosferatumiamor" data-ext>github.com/Nosferatumiamor</a>.
+            </p>
+          </section>
+
+          <section>
+            <h3>Disclaimer</h3>
+            <p>
+              The models are unfiltered and can produce anything, including weird, ugly or offensive things. You
+              are responsible for what you generate and share. The ModelScope model is licensed for
+              non-commercial use: read each license before using results commercially. Nothing leaves your
+              machine except the one-time downloads.
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

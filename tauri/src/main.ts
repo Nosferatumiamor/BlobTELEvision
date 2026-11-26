@@ -404,6 +404,33 @@ $<HTMLButtonElement>("#open-outputs-btn").addEventListener("click", async () => 
   }
 });
 
+// ---------------------------------------------------------------- about / credits
+const aboutOverlayEl = $<HTMLDivElement>("#about-overlay");
+function setAboutOpen(open: boolean) {
+  aboutOverlayEl.hidden = !open;
+  if (open) $<HTMLDivElement>("#about-body").scrollTop = 0;
+}
+$<HTMLButtonElement>("#about-btn").addEventListener("click", () => setAboutOpen(true));
+$<HTMLButtonElement>("#about-close").addEventListener("click", () => setAboutOpen(false));
+aboutOverlayEl.addEventListener("click", (e) => {
+  if (e.target === aboutOverlayEl) setAboutOpen(false); // click outside the dialog
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !aboutOverlayEl.hidden) setAboutOpen(false);
+});
+// Links go to the system browser: left alone, the webview would navigate away from the app.
+aboutOverlayEl.addEventListener("click", async (e) => {
+  const a = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[data-ext]");
+  if (!a) return;
+  e.preventDefault();
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_external", { url: a.href });
+  } catch {
+    window.open(a.href, "_blank", "noopener"); // browser dev mode
+  }
+});
+
 // Purely cosmetic: the TV knobs turn a bit when clicked.
 document.querySelectorAll<HTMLButtonElement>(".tv-knob").forEach((knob) => {
   let angle = 0;
