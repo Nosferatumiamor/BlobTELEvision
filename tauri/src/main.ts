@@ -404,6 +404,65 @@ $<HTMLButtonElement>("#open-outputs-btn").addEventListener("click", async () => 
   }
 });
 
+// ---------------------------------------------------------------- TV progress bar
+// The speaker grille under the screen doubles as a progress bar: its slats light
+// up one by one from yellow to red, and the red LED is on whenever anything works.
+// A number is a 0..1 fraction, null is "busy, unknown progress" (a light sweeps
+// across), undefined is "idle". Generation wins over downloads, which win over startup.
+const TV_SEGMENTS = 28;
+const tvGrilleEl = $<HTMLDivElement>("#tv-grille");
+const tvLedEl = $<HTMLDivElement>("#tv-led");
+const tvSegs: HTMLElement[] = [];
+for (let i = 0; i < TV_SEGMENTS; i++) {
+  const seg = document.createElement("i");
+  const hue = Math.round(55 - (55 * i) / (TV_SEGMENTS - 1)); // 55 = yellow ... 0 = red
+  seg.style.setProperty("--c", "hsl(" + hue + " 100% 52%)");
+  tvGrilleEl.appendChild(seg);
+  tvSegs.push(seg);
+}
+type TvValue = number | null | undefined;
+const tvSources: Record<"gen" | "models" | "startup", TvValue> = {
+  gen: undefined,
+  models: undefined,
+  startup: undefined,
+};
+let tvScanTimer: number | null = null;
+let tvScanPos = 0;
+
+function tvLight(isOn: (i: number) => boolean) {
+  tvSegs.forEach((seg, i) => seg.classList.toggle("on", isOn(i)));
+}
+function tvStopScan() {
+  if (tvScanTimer !== null) {
+    clearInterval(tvScanTimer);
+    tvScanTimer = null;
+  }
+}
+function tvRender() {
+  const key = (["gen", "models", "startup"] as const).find((k) => tvSources[k] !== undefined);
+  tvLedEl.classList.toggle("on", key !== undefined);
+  const v = key === undefined ? undefined : tvSources[key];
+  if (typeof v === "number") {
+    tvStopScan();
+    const lit = Math.round(Math.min(1, Math.max(0, v)) * TV_SEGMENTS);
+    tvLight((i) => i < Math.max(lit, v > 0 ? 1 : 0));
+  } else if (v === null) {
+    if (tvScanTimer === null) {
+      tvScanTimer = window.setInterval(() => {
+        tvScanPos = (tvScanPos + 1) % (TV_SEGMENTS + 5);
+        tvLight((i) => i <= tvScanPos && i > tvScanPos - 5);
+      }, 70);
+    }
+  } else {
+    tvStopScan();
+    tvLight(() => false);
+  }
+}
+function tvSet(source: "gen" | "models" | "startup", value: TvValue) {
+  tvSources[source] = value;
+  tvRender();
+}
+
 // ---------------------------------------------------------------- about / credits
 const aboutOverlayEl = $<HTMLDivElement>("#about-overlay");
 function setAboutOpen(open: boolean) {
@@ -505,6 +564,7 @@ function renderStartup(startedAt: number) {
     bootstrapFillEl.style.width = Math.min(90, 100 * (1 - Math.exp(-elapsed / 8))) + "%";
     bootstrapElapsedEl.textContent = "Elapsed " + mm + ":" + ss;
   }
+  if (bootstrapLogSeen || elapsed >= 2) tvSet("startup", parseFloat(bootstrapFillEl.style.width) / 100);
 }
 
 async function waitForEngine() {
@@ -515,6 +575,7 @@ async function waitForEngine() {
       await fetchJson("/health");
       bootstrapPanelEl.hidden = true;
       outputEmptyEl.hidden = false;
+      tvSet("startup", undefined);
       engineUp = true;
       setEngineStatus("Engine reachable", "status-ok");
       formats = await fetchJson("/formats");
@@ -553,6 +614,31 @@ const MANUAL_FALLBACK: Record<ModelKey, string> = {
   i2v: 'Manual fallback: download "ali-vilab/i2vgen-xl" from huggingface.co (fp16 safetensors, diffusers layout) into models/i2vgen-xl/, then create an empty file named .blobtv_complete in that folder.',
 };
 
+// Combined download progress for everything currently installing, weighted by size.
+// Progress text looks like "Downloading X (0.4 / ~3.7 GB)"; anything that does not
+// parse (zip extraction, tiny files) counts as busy with unknown progress.
+function modelsProgressFraction(status: Record<ModelKey, ModelStatus>): TvValue {
+  let got = 0;
+  let total = 0;
+  let any = false;
+  let unknown = false;
+  for (const key of Object.keys(status) as ModelKey[]) {
+    const s = status[key];
+    if (!s.installing) continue;
+    any = true;
+    const m = /\(([\d.]+)\s*\/\s*~?([\d.]+)\s*GB\)/.exec(s.progress ?? "");
+    if (m) {
+      got += Number(m[1]);
+      total += Number(m[2]);
+    } else {
+      unknown = true;
+    }
+  }
+  if (!any) return undefined;
+  if (unknown || total <= 0) return null;
+  return got / total;
+}
+
 async function refreshModels(): Promise<boolean> {
   let status: Record<ModelKey, ModelStatus>;
   try {
@@ -561,6 +647,7 @@ async function refreshModels(): Promise<boolean> {
     return true;
   }
   modelsStatus = status;
+  tvSet("models", modelsProgressFraction(status));
   updateReduxUi();
   const keys = Object.keys(MODEL_CHECKBOXES) as Kind[];
   keys.forEach((key) => {
@@ -707,6 +794,7 @@ function stopPreviewPolling() {
 }
 
 function renderProgress(job: JobSnapshot) {
+  tvSet("gen", job.total > 0 ? job.step / job.total : null);
   if (job.total > 0) {
     const pct = Math.min(100, Math.round((job.step / job.total) * 100));
     progressFillEl.style.width = pct + "%";
@@ -721,7 +809,7 @@ function renderProgress(job: JobSnapshot) {
 
 function setGenerating(on: boolean) {
   generating = on;
-  $<HTMLDivElement>("#tv-led").classList.toggle("on", on);
+  tvSet("gen", on ? null : undefined);
   generateBtn.hidden = on;
   abortBtn.hidden = !on;
   progressWrapEl.hidden = !on && jobLogEl.hidden;
