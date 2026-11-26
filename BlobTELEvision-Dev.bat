@@ -1,4 +1,5 @@
 @echo off
+if "%~1"=="--child" goto :child
 chcp 65001 >nul 2>&1
 title BlobTELEvision (DEV)
 cd /d "%~dp0tauri"
@@ -6,7 +7,6 @@ cd /d "%~dp0tauri"
 echo.
 echo  BlobTELEvision - MODE DEV (recompile a chaque lancement, ~1-2 min).
 echo  Pour juste lancer l'app rapidement, utilise BlobTELEvision.bat a la place.
-echo  Interface en mode dev - premiere generation = chargement modeles, 1 a 3 min.
 echo.
 
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
@@ -29,11 +29,20 @@ if not exist node_modules (
     )
 )
 
-call npm run tauri dev
-if errorlevel 1 (
-    echo.
-    echo BlobTELEvision a plante ou le build a echoue - voir l'erreur ci-dessus.
-    echo Appuie sur une touche pour fermer cette fenetre.
-    pause >nul
-)
+REM The real run happens in a hidden console, so no black window stays on the
+REM desktop while the app is open. Its output goes to logs\dev.log, which is
+REM only opened if the build or the app fails.
+echo  Lancement... la fenetre de l'app apparait dans 1 a 2 minutes (compilation).
+echo  Log : logs\dev.log
+set "SELF=%~f0"
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -WindowStyle Hidden -ArgumentList '/c', ('\"' + $env:SELF + '\" --child')"
+ping -n 5 127.0.0.1 >nul
+exit /b 0
+
+:child
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+cd /d "%~dp0tauri"
+if not exist "..\logs" mkdir "..\logs"
+call npm run tauri dev > "..\logs\dev.log" 2>&1
+if errorlevel 1 start "" notepad "..\logs\dev.log"
 exit /b 0
