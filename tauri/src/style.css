@@ -281,6 +281,55 @@ button {
   border-color: var(--accent);
 }
 
+/* --- heavy format warning --- */
+
+.warn-pill {
+  position: relative;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: help;
+  user-select: none;
+}
+
+.warn-sign {
+  font-size: 0.9rem;
+}
+
+.warn-bubble {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 50;
+  width: 280px;
+  padding: 0.7rem 0.8rem;
+  background: var(--panel-2);
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.45;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.warn-pill:hover .warn-bubble,
+.warn-pill:focus .warn-bubble,
+.warn-pill.open .warn-bubble {
+  display: block;
+}
+
 /* --- drop zone --- */
 
 .drop-zone {

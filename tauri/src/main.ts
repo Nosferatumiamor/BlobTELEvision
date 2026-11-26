@@ -104,6 +104,7 @@ const upscaleEl = $<HTMLSelectElement>("#upscale");
 const interpEl = $<HTMLSelectElement>("#interp");
 const reduxHintEl = $<HTMLParagraphElement>("#redux-hint");
 const reduxInstallBtn = $<HTMLButtonElement>("#redux-install-btn");
+const formatWarningEl = $<HTMLDivElement>("#format-warning");
 
 const MODEL_CHECKBOXES: Record<Kind, HTMLInputElement> = {
   t2v: $<HTMLInputElement>("#cb-t2v"),
@@ -267,7 +268,7 @@ function populateFormats(kind: Kind, preferred?: string) {
       kind === "t2v" && key === "256x256"
         ? "  (native)"
         : kind === "i2v" && key === "1280x704"
-          ? "  (native, very slow on 12 GB)"
+          ? "  (native, heavy)"
           : kind === "i2v" && key === "640x352"
             ? "  (fast)"
             : "";
@@ -276,6 +277,21 @@ function populateFormats(kind: Kind, preferred?: string) {
   }
   if (preferred && map[preferred]) formatEl.value = preferred;
 }
+
+// Formats that only really work on big GPUs (same pixel count either way).
+const HEAVY_FORMATS: Record<Kind, string[]> = { t2v: [], i2v: ["1280x704", "704x1280"] };
+
+function updateFormatWarning() {
+  formatWarningEl.hidden = !HEAVY_FORMATS[currentKind()].includes(formatEl.value);
+  if (formatWarningEl.hidden) formatWarningEl.classList.remove("open");
+}
+formatEl.addEventListener("change", updateFormatWarning);
+// Hover shows the bubble (CSS); a click toggles it too, for touchpads and keyboard users.
+formatWarningEl.addEventListener("click", (e) => {
+  e.stopPropagation();
+  formatWarningEl.classList.toggle("open");
+});
+document.addEventListener("click", () => formatWarningEl.classList.remove("open"));
 
 function applyMode() {
   const kind = currentKind();
@@ -286,6 +302,7 @@ function applyMode() {
   setSlider(stepsEl, d.steps);
   setSlider(guidanceEl, d.guidance);
   populateFormats(kind, d.format);
+  updateFormatWarning();
   initFieldEl.hidden = kind !== "i2v";
   updateGenerateEnabled();
   updateEmptyHint();

@@ -164,6 +164,26 @@ I2V_FORMATS = {
 }
 
 
+# Measured on a 12 GB RTX 3060 at 1280x704 (I2VGen-XL, CPU offload, desktop running):
+# 8 frames take 2.3 s/step (7.8 GB peak). 12 frames already saturate VRAM (10.2 GB
+# peak, 525 s for 25 steps once the desktop takes its share) and 16 frames take
+# ~120 s/step because activations spill into shared memory. The cliff is purely
+# memory, so cap frames from a pixel-frame budget (8 frames at 1280x704) that
+# scales with VRAM, keeping ~4 GB of headroom on a 12 GB card.
+_I2V_PIXEL_FRAME_BUDGET_12GB = 7.6e6
+
+
+def i2v_max_frames(width: int, height: int) -> int:
+    try:
+        import torch
+
+        total_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+    except Exception:
+        total_gb = 12.0
+    budget = _I2V_PIXEL_FRAME_BUDGET_12GB * (total_gb / 12.0)
+    return max(4, int(budget // (int(width) * int(height))))
+
+
 @dataclass
 class GenParams:
     kind: str = "t2v"  # "t2v" | "i2v"
@@ -303,6 +323,16 @@ class TelevisionEngine:
             if p.seed is None or p.seed < 0:
                 p.seed = int.from_bytes(os.urandom(4), "little")
             generator = torch.Generator(device="cpu").manual_seed(int(p.seed))
+            if p.kind == "i2v":
+                cap = i2v_max_frames(p.width, p.height)
+                if p.num_frames > cap:
+                    on_progress(
+                        "Capping frames {} -> {}: {}x{} would overflow your VRAM (huge slowdown). "
+                        "Use Redux frame interpolation to add frames back.".format(
+                            p.num_frames, cap, p.width, p.height
+                        )
+                    )
+                    p.num_frames = cap
 
             total_steps = int(p.steps)
             counter = {"n": 0}

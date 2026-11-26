@@ -62,4 +62,9 @@ Type-check the frontend with `npx tsc --noEmit` from `tauri/`.
 - `ensure_layout()` sweeps `work/` once per process only (a re-sweep mid-session deletes active job files).
 - Redux interpolation multiplies the fps by the same factor as the frame count, so the duration is preserved
   (N frames -> N*f-(f-1)). The JSON sidecar records `base_fps`, `upscale`, `interp` and `output_size`.
+- I2VGen-XL has a VRAM cliff, not a gradual slowdown (`i2v_max_frames` in `blobtv_engine.py`): at 1280x704 on a
+  12 GB card, 8 frames run at 2.3 s/step, 12 frames saturate VRAM (~9 min per job) and 16 frames take ~120 s/step.
+  Frames are therefore capped automatically from a pixel-frame budget that scales with VRAM; the UI shows a
+  "NEEDS STRONG GPU" pill with an explanatory bubble for those formats. `unet.enable_forward_chunking()` was
+  tried and is much slower (68 s/step), don't re-try it.
 - Output files: `YYMMDD_T_NNN_prompt.mp4` (text to video) / `_I_` (image to video) plus a `.json` sidecar with the parameters.

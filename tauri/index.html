@@ -70,6 +70,14 @@
           <span class="field-label">Format</span>
           <select id="format"></select>
         </label>
+        <div id="format-warning" class="warn-pill" hidden tabindex="0" role="button" aria-describedby="format-warning-bubble">
+          <span class="warn-sign">⚠</span> NEEDS STRONG GPU
+          <span id="format-warning-bubble" class="warn-bubble" role="tooltip">
+            Tested on a 12 GB GPU. At this size a full clip is far too slow to be practical (minutes per
+            step), so frames are capped automatically to what fits in VRAM. We leave the option available
+            in the hope that your hardware does better, but on our side this feature is experimental.
+          </span>
+        </div>
 
         <label class="field">
           <span class="field-label">Frames <span id="frames-value" class="field-value">16</span></span>
