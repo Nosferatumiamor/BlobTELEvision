@@ -123,21 +123,31 @@ fn repo_root() -> PathBuf {
         .parent()
         .expect("exe path should have a parent directory")
         .to_path_buf();
+    // Keeps the OUTERMOST folder that has app/python/blobtv_api.py, not the
+    // nearest one. `tauri dev` / `tauri build` copy the bundled `app/` resource
+    // next to the exe (target/debug/app, target/release/app), so the nearest
+    // match is the build output folder: the venv, models and outputs would then
+    // be created inside target/ instead of using the repo's own. An installed
+    // app has only one match (its install folder), so nothing changes there.
+    let mut found: Option<PathBuf> = None;
     loop {
         let api_script = dir.join("app").join("python").join("blobtv_api.py");
         if api_script.is_file() {
-            return dir;
+            found = Some(dir.clone());
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
-            None => panic!(
-                "Could not find the BlobTELEvision repo root (app/python/blobtv_api.py) \
-                 by walking up from {}. Is this exe still inside the portable BlobTELEvision \
-                 folder?",
-                exe.display()
-            ),
+            None => break,
         }
     }
+    found.unwrap_or_else(|| {
+        panic!(
+            "Could not find the BlobTELEvision repo root (app/python/blobtv_api.py) \
+             by walking up from {}. Is this exe still inside the portable BlobTELEvision \
+             folder?",
+            exe.display()
+        )
+    })
 }
 
 // The venv's interpreter can live in either of two layouts depending on how

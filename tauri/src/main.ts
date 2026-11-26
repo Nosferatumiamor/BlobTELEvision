@@ -840,7 +840,33 @@ function renderGallery() {
     empty.innerHTML = VHS_SVG;
     galleryEl.appendChild(empty);
   }
+  updateGalleryArrows();
 }
+
+// Arrows only exist when there are more videos than fit, and only on the side that has more.
+const galleryPrevEl = $<HTMLButtonElement>("#gallery-prev");
+const galleryNextEl = $<HTMLButtonElement>("#gallery-next");
+function updateGalleryArrows() {
+  const max = galleryEl.scrollWidth - galleryEl.clientWidth;
+  galleryPrevEl.hidden = galleryEl.scrollLeft <= 2;
+  galleryNextEl.hidden = max - galleryEl.scrollLeft <= 2;
+}
+function scrollGallery(dir: number) {
+  galleryEl.scrollBy({ left: dir * galleryEl.clientWidth * 0.8, behavior: "smooth" });
+}
+galleryPrevEl.addEventListener("click", () => scrollGallery(-1));
+galleryNextEl.addEventListener("click", () => scrollGallery(1));
+galleryEl.addEventListener("scroll", updateGalleryArrows);
+// Mouse wheel over the shelf scrolls it sideways (only when it actually overflows).
+galleryEl.addEventListener(
+  "wheel",
+  (e) => {
+    if (galleryEl.scrollWidth <= galleryEl.clientWidth) return;
+    e.preventDefault();
+    galleryEl.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  },
+  { passive: false },
+);
 
 async function refreshGallery() {
   try {
@@ -849,6 +875,9 @@ async function refreshGallery() {
     return;
   }
   renderGallery();
+  // newest generation is always the first card: bring it into view
+  galleryEl.scrollLeft = 0;
+  updateGalleryArrows();
 }
 window.addEventListener("resize", () => renderGallery());
 

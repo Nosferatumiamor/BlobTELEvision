@@ -110,6 +110,14 @@ def download_model(key: str, on_progress: Optional[Callable[[str], None]] = None
     enable_hub_downloads()
     from huggingface_hub import snapshot_download
 
+    # snapshot_download fetches files from a thread pool, and tqdm creates its
+    # class-level lock lazily: two threads racing to create the first progress
+    # bars raise "type object 'tqdm' has no attribute '_lock'" and kill the whole
+    # download. Creating the lock up front, from this one thread, removes the race.
+    from tqdm.std import tqdm as _std_tqdm
+
+    _std_tqdm.get_lock()
+
     out_dir = spec["dir"]
     os.makedirs(out_dir, exist_ok=True)
     total_bytes = spec["size_gb"] * 1e9

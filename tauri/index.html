@@ -208,7 +208,11 @@
     <!-- Full-width shelf of recent videos; empty slots show a grey VHS tape. -->
     <section id="gallery-bar">
       <span class="field-label">Recent videos</span>
-      <div id="gallery"></div>
+      <div id="gallery-wrap">
+        <button id="gallery-prev" class="gallery-arrow" type="button" aria-label="Scroll left" hidden>‹</button>
+        <div id="gallery"></div>
+        <button id="gallery-next" class="gallery-arrow" type="button" aria-label="Scroll right" hidden>›</button>
+      </div>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

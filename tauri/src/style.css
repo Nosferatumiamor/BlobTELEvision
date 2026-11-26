@@ -483,7 +483,8 @@ button {
 
 #output-box {
   position: relative;
-  width: min(100%, calc((100vh - 20rem) * 4 / 3));
+  /* 27rem = everything on the page that is not the screen (header, TV frame, shelf) */
+  width: min(100%, calc((100vh - 27rem) * 4 / 3));
   min-width: 280px;
   aspect-ratio: 4 / 3;
   margin: 0 auto;
@@ -656,7 +657,7 @@ button {
 
 #gallery-bar {
   /* shelf under all three columns: label pulled up-left, slots span the full width */
-  padding: 0 1.5rem 1.25rem;
+  padding: 0 1.5rem 0.9rem;
   margin-top: -0.6rem;
 }
 #gallery-bar .field-label {
@@ -664,11 +665,42 @@ button {
   margin-bottom: 0.35rem;
 }
 
+#gallery-wrap {
+  position: relative;
+}
 #gallery {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 0.4rem;
+  scrollbar-width: none; /* arrows + mouse wheel replace the scrollbar */
+}
+#gallery::-webkit-scrollbar {
+  display: none;
+}
+.gallery-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 38px;
+  border: 0;
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  background: linear-gradient(90deg, rgba(16, 13, 24, 0.92), rgba(16, 13, 24, 0));
+}
+.gallery-arrow:hover {
+  color: var(--accent);
+}
+#gallery-prev {
+  left: 0;
+  border-radius: 8px 0 0 8px;
+}
+#gallery-next {
+  right: 0;
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(270deg, rgba(16, 13, 24, 0.92), rgba(16, 13, 24, 0));
 }
 .gallery-empty {
   display: flex;
