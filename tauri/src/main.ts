@@ -110,14 +110,20 @@ const reduxHintEl = $<HTMLParagraphElement>("#redux-hint");
 const reduxInstallBtn = $<HTMLButtonElement>("#redux-install-btn");
 const formatWarningEl = $<HTMLDivElement>("#format-warning");
 
-const MODEL_CHECKBOXES: Record<Kind, HTMLInputElement> = {
-  t2v: $<HTMLInputElement>("#cb-t2v"),
-  i2v: $<HTMLInputElement>("#cb-i2v"),
-};
-const MODEL_PROGRESS: Record<Kind, HTMLSpanElement> = {
-  t2v: $<HTMLSpanElement>("#progress-t2v"),
-  i2v: $<HTMLSpanElement>("#progress-i2v"),
-};
+const MODEL_KEYS: ModelKey[] = ["t2v", "i2v", "esrgan", "rife"];
+const MODEL_CHECKBOXES = Object.fromEntries(
+  MODEL_KEYS.map((k) => [k, $<HTMLInputElement>("#cb-" + k)]),
+) as Record<ModelKey, HTMLInputElement>;
+const MODEL_PROGRESS = Object.fromEntries(
+  MODEL_KEYS.map((k) => [k, $<HTMLSpanElement>("#progress-" + k)]),
+) as Record<ModelKey, HTMLSpanElement>;
+const MODEL_UNINSTALL = Object.fromEntries(
+  MODEL_KEYS.map((k) => [k, $<HTMLButtonElement>("#un-" + k)]),
+) as Record<ModelKey, HTMLButtonElement>;
+const modelsTitleEl = $<HTMLParagraphElement>("#models-title");
+const modelsCloseBtnEl = $<HTMLButtonElement>("#models-close-btn");
+// Set by the top-bar "Models" button: keeps the panel open even when everything is installed.
+let modelsPanelPinned = false;
 
 // ---------------------------------------------------------------- state
 const MODE_BLURBS: Record<Kind, string> = {
@@ -421,8 +427,11 @@ for (let i = 0; i < TV_SEGMENTS; i++) {
   tvSegs.push(seg);
 }
 type TvValue = number | null | undefined;
-const tvSources: Record<"gen" | "models" | "startup", TvValue> = {
+type TvSource = "gen" | "load" | "models" | "startup";
+const TV_PRIORITY: TvSource[] = ["gen", "load", "models", "startup"];
+const tvSources: Record<TvSource, TvValue> = {
   gen: undefined,
+  load: undefined,
   models: undefined,
   startup: undefined,
 };
@@ -439,7 +448,7 @@ function tvStopScan() {
   }
 }
 function tvRender() {
-  const key = (["gen", "models", "startup"] as const).find((k) => tvSources[k] !== undefined);
+  const key = TV_PRIORITY.find((k) => tvSources[k] !== undefined);
   tvLedEl.classList.toggle("on", key !== undefined);
   const v = key === undefined ? undefined : tvSources[key];
   if (typeof v === "number") {
@@ -458,7 +467,7 @@ function tvRender() {
     tvLight(() => false);
   }
 }
-function tvSet(source: "gen" | "models" | "startup", value: TvValue) {
+function tvSet(source: TvSource, value: TvValue) {
   tvSources[source] = value;
   tvRender();
 }
@@ -490,12 +499,45 @@ aboutOverlayEl.addEventListener("click", async (e) => {
   }
 });
 
-// Purely cosmetic: the TV knobs turn a bit when clicked.
-document.querySelectorAll<HTMLButtonElement>(".tv-knob").forEach((knob) => {
-  let angle = 0;
-  knob.addEventListener("click", () => {
-    angle += 50 + Math.floor(Math.random() * 60);
-    knob.style.transform = "rotate(" + angle + "deg)";
+// ---------------------------------------------------------------- TV knobs
+// Small knob = SCAN (scanlines, then rolling bar + grain, then jitter), big knob =
+// GLASS (glare, vignette, bloom, then colour fringing). Click to go to the next
+// notch; after the last one it comes back to OFF. Both are OFF by default.
+const outputBoxEl = $<HTMLDivElement>("#output-box");
+const KNOB_ANGLES = [-130, -45, 45, 130]; // off, low, medium, heavy
+const KNOB_LEVEL_NAMES = ["off", "low", "medium", "heavy"];
+const KNOB_STORAGE_PREFIX = "blobtv.knob.";
+
+function setKnob(name: "scan" | "glass", level: number, save: boolean) {
+  const knob = $<HTMLButtonElement>("#knob-" + name);
+  outputBoxEl.dataset[name] = String(level);
+  knob.style.setProperty("--a", KNOB_ANGLES[level] + "deg");
+  const title = (name === "scan" ? "Scanlines and interference: " : "CRT glass glow: ") + KNOB_LEVEL_NAMES[level];
+  knob.title = title + " (click to change)";
+  knob.setAttribute("aria-label", title);
+  document
+    .querySelectorAll<HTMLElement>('.tv-pips[data-for="' + name + '"] i')
+    .forEach((pip, i) => pip.classList.toggle("on", level >= i + 1));
+  if (save) {
+    try {
+      localStorage.setItem(KNOB_STORAGE_PREFIX + name, String(level));
+    } catch {
+      // storage can be unavailable: the setting just will not be remembered
+    }
+  }
+}
+(["scan", "glass"] as const).forEach((name) => {
+  let level = 0;
+  try {
+    const saved = Number(localStorage.getItem(KNOB_STORAGE_PREFIX + name));
+    if (Number.isInteger(saved) && saved >= 0 && saved < KNOB_ANGLES.length) level = saved;
+  } catch {
+    // no storage: stay OFF
+  }
+  setKnob(name, level, false);
+  $<HTMLButtonElement>("#knob-" + name).addEventListener("click", () => {
+    level = (level + 1) % KNOB_ANGLES.length;
+    setKnob(name, level, true);
   });
 });
 
@@ -649,15 +691,21 @@ async function refreshModels(): Promise<boolean> {
   modelsStatus = status;
   tvSet("models", modelsProgressFraction(status));
   updateReduxUi();
-  const keys = Object.keys(MODEL_CHECKBOXES) as Kind[];
-  keys.forEach((key) => {
+  MODEL_KEYS.forEach((key) => {
     const cb = MODEL_CHECKBOXES[key];
     const done = modelDone(status[key]);
     cb.checked = done ? true : cb.checked;
     cb.disabled = status[key].ready || status[key].installing;
-    cb.parentElement!.classList.toggle("models-row-done", done);
-    MODEL_PROGRESS[key].textContent = done ? "done" : status[key].progress ?? "";
+    cb.closest(".models-row")!.classList.toggle("models-row-done", done);
+    MODEL_PROGRESS[key].textContent = done ? "installed" : status[key].progress ?? "not installed";
+    // Uninstall only for what is installed and not busy; the two-click confirm resets on every refresh.
+    const un = MODEL_UNINSTALL[key];
+    un.hidden = !done;
+    un.disabled = generating;
+    if (!un.classList.contains("confirm")) un.textContent = "Uninstall";
   });
+  modelsTitleEl.textContent = modelDone(status.t2v) ? "Models" : "Model weights not installed";
+  modelsCloseBtnEl.hidden = !modelsPanelPinned;
   if (pendingInstall.size > 0) {
     const failed = Array.from(pendingInstall).filter((k) => !status[k].installing && !modelDone(status[k]));
     modelsInstallStatusEl.hidden = failed.length === 0;
@@ -674,6 +722,7 @@ async function refreshModels(): Promise<boolean> {
   // is mandatory, so the panel collapses as soon as it is installed, unless a
   // download is still running or a failure message is waiting to be read.
   modelsPanelEl.hidden =
+    !modelsPanelPinned &&
     modelDone(status.t2v) &&
     pendingInstall.size === 0 &&
     !status.i2v.installing &&
@@ -683,8 +732,54 @@ async function refreshModels(): Promise<boolean> {
   return modelDone(status.t2v);
 }
 
+// Top-bar "Models" button: bring the install screen back to see what is installed.
+$<HTMLButtonElement>("#models-btn").addEventListener("click", () => {
+  modelsPanelPinned = !modelsPanelPinned;
+  modelsInstallStatusEl.hidden = true;
+  void refreshModels();
+});
+modelsCloseBtnEl.addEventListener("click", () => {
+  modelsPanelPinned = false;
+  modelsInstallStatusEl.hidden = true;
+  void refreshModels();
+});
+
+// Uninstall a la carte. First click arms it ("Really delete?"), second click within 4 s does it.
+MODEL_KEYS.forEach((key) => {
+  const btn = MODEL_UNINSTALL[key];
+  let armTimer: number | null = null;
+  btn.addEventListener("click", async () => {
+    if (!btn.classList.contains("confirm")) {
+      btn.classList.add("confirm");
+      btn.textContent = "Really delete?";
+      armTimer = window.setTimeout(() => {
+        btn.classList.remove("confirm");
+        btn.textContent = "Uninstall";
+      }, 4000);
+      return;
+    }
+    if (armTimer !== null) clearTimeout(armTimer);
+    btn.classList.remove("confirm");
+    btn.disabled = true;
+    btn.textContent = "Deleting...";
+    try {
+      const res = await fetchJson("/models/uninstall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: [key] }),
+      });
+      if (!res.ok) throw new Error(Object.values(res.errors as Record<string, string>).join("; "));
+    } catch (err) {
+      modelsInstallStatusEl.hidden = false;
+      modelsInstallStatusEl.textContent = "Uninstall failed: " + (err as Error).message;
+    }
+    await refreshModels();
+    if (key === "t2v") void warmupIfReady(); // refreshes the engine status text
+  });
+});
+
 modelsInstallBtnEl.addEventListener("click", async () => {
-  const targets = (Object.keys(MODEL_CHECKBOXES) as Kind[]).filter(
+  const targets = MODEL_KEYS.filter(
     (k) => MODEL_CHECKBOXES[k].checked && !MODEL_CHECKBOXES[k].disabled,
   );
   if (targets.length === 0) return;
@@ -719,6 +814,8 @@ async function warmupIfReady() {
     return;
   }
   setEngineStatus("Loading ModelScope...", "status-pending");
+  // Loading a multi-GB model has no real progress to report: the grille sweeps and the LED is on.
+  tvSet("load", null);
   try {
     await fetchJson("/warmup", {
       method: "POST",
@@ -728,21 +825,25 @@ async function warmupIfReady() {
   } catch {
     // a failed warmup just means the first Generate pays the load itself
   }
-  for (let i = 0; i < 600; i++) {
-    try {
-      const st = await fetchJson("/status");
-      if (st.loaded) {
-        setEngineStatus("Ready (" + st.loaded + " loaded)", "status-ok");
+  try {
+    for (let i = 0; i < 600; i++) {
+      try {
+        const st = await fetchJson("/status");
+        if (st.loaded) {
+          setEngineStatus("Ready (" + st.loaded + " loaded)", "status-ok");
+          return;
+        }
+        if (!st.loading && st.error) {
+          setEngineStatus("Load failed: " + st.error, "status-error");
+          return;
+        }
+      } catch {
         return;
       }
-      if (!st.loading && st.error) {
-        setEngineStatus("Load failed: " + st.error, "status-error");
-        return;
-      }
-    } catch {
-      return;
+      await sleep(1000);
     }
-    await sleep(1000);
+  } finally {
+    tvSet("load", undefined);
   }
 }
 
@@ -902,6 +1003,16 @@ function finishGeneration(status: string, cls: "status-pending" | "status-ok" | 
 }
 
 generateBtn.addEventListener("click", () => void onGenerate());
+
+// Enter in the prompt boxes starts the generation; Shift+Enter still adds a new line in the prompt.
+[promptEl, negativeEl].forEach((el) =>
+  el.addEventListener("keydown", (ev: Event) => {
+    const e = ev as KeyboardEvent;
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    if (!generateBtn.hidden && !generateBtn.disabled) generateBtn.click();
+  }),
+);
 abortBtn.addEventListener("click", async () => {
   abortBtn.disabled = true;
   try {

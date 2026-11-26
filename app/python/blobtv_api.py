@@ -41,7 +41,7 @@ from blobtv_engine import (
     download_model,
     model_status,
 )
-from blobtv_paths import outputs_dir, uploads_dir
+from blobtv_paths import MODELS_ROOT, outputs_dir, uploads_dir
 import blobtv_post
 
 API_PORT_DEFAULT = 8421
@@ -235,6 +235,41 @@ def models_install(targets: List[str] = Body(..., embed=True)):
         threading.Thread(target=run, daemon=True).start()
         started.append(key)
     return {"ok": True, "installing": started}
+
+
+@app.post("/models/uninstall")
+def models_uninstall(targets: List[str] = Body(..., embed=True)):
+    """Deletes the downloaded files of the requested models (a la carte). Refused
+    while a generation or a download is running. A loaded model is unloaded first
+    so Windows lets go of its memory-mapped weight files."""
+    if _job_running:
+        raise HTTPException(409, "A generation is running. Abort it or wait before uninstalling.")
+    with _install_lock:
+        busy = [k for k in targets if k in _installing]
+    if busy:
+        raise HTTPException(409, "Still downloading: {}.".format(", ".join(busy)))
+    removed, errors = [], {}
+    for key in targets:
+        if key not in _ALL_KEYS:
+            continue
+        path = os.path.abspath(_status_of(key)["path"])
+        # Only ever delete a direct child folder of models/ (never models/ itself, never elsewhere).
+        if os.path.dirname(path) != os.path.abspath(MODELS_ROOT):
+            errors[key] = "Refusing to delete unexpected path {}".format(path)
+            continue
+        if key in MODELS and _engine.status()["loaded"] == key:
+            _engine.unload()
+        if key == "esrgan":
+            _engine._upscaler = blobtv_post.Upscaler()
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            with _install_lock:
+                _install_progress.pop(key, None)
+            removed.append(key)
+        except Exception as exc:
+            errors[key] = "{}: {}".format(type(exc).__name__, exc)
+    return {"ok": not errors, "removed": removed, "errors": errors}
 
 
 @app.post("/warmup")

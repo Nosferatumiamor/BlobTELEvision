@@ -21,6 +21,7 @@
         </div>
       </div>
       <div id="top-bar-right">
+        <button id="models-btn" type="button" class="menu-btn" title="Show installed models, download or uninstall them">Models</button>
         <label
           id="fast-boot-toggle"
           class="checkbox-inline"
@@ -92,22 +93,47 @@
 
               <!-- Shown inside the screen until the text-to-video weights are installed. -->
               <div id="models-panel" hidden>
-                <p class="empty-title">Model weights not installed</p>
+                <p class="empty-title" id="models-title">Model weights not installed</p>
                 <p class="field-hint">
                   BlobTELEvision never downloads anything on its own. Tick what you want, then download.
-                  Image → videslop is optional.
+                  Image → videslop and the Redux tools are optional. Installed items can be uninstalled.
                 </p>
-                <label class="checkbox-field models-row">
-                  <input id="cb-t2v" type="checkbox" checked />
-                  <span class="models-row-name">ModelScope text-to-video, 1.7B (~3.7 GB)</span>
+                <div class="models-row">
+                  <label class="models-row-main">
+                    <input id="cb-t2v" type="checkbox" checked />
+                    <span class="models-row-name">ModelScope text-to-video, 1.7B (~3.7 GB)</span>
+                  </label>
+                  <button id="un-t2v" type="button" class="menu-btn models-uninstall" hidden>Uninstall</button>
                   <span id="progress-t2v" class="models-row-progress"></span>
-                </label>
-                <label class="checkbox-field models-row">
-                  <input id="cb-i2v" type="checkbox" />
-                  <span class="models-row-name">I2VGen-XL image-to-video (~5 GB)</span>
+                </div>
+                <div class="models-row">
+                  <label class="models-row-main">
+                    <input id="cb-i2v" type="checkbox" />
+                    <span class="models-row-name">I2VGen-XL image-to-video (~5 GB)</span>
+                  </label>
+                  <button id="un-i2v" type="button" class="menu-btn models-uninstall" hidden>Uninstall</button>
                   <span id="progress-i2v" class="models-row-progress"></span>
-                </label>
-                <button id="models-install-btn" type="button">Download selected</button>
+                </div>
+                <div class="models-row">
+                  <label class="models-row-main">
+                    <input id="cb-esrgan" type="checkbox" />
+                    <span class="models-row-name">Redux: Real-ESRGAN upscaler (~0.14 GB)</span>
+                  </label>
+                  <button id="un-esrgan" type="button" class="menu-btn models-uninstall" hidden>Uninstall</button>
+                  <span id="progress-esrgan" class="models-row-progress"></span>
+                </div>
+                <div class="models-row">
+                  <label class="models-row-main">
+                    <input id="cb-rife" type="checkbox" />
+                    <span class="models-row-name">Redux: RIFE frame interpolation (~0.43 GB)</span>
+                  </label>
+                  <button id="un-rife" type="button" class="menu-btn models-uninstall" hidden>Uninstall</button>
+                  <span id="progress-rife" class="models-row-progress"></span>
+                </div>
+                <div class="models-actions">
+                  <button id="models-install-btn" type="button">Download selected</button>
+                  <button id="models-close-btn" type="button" class="menu-btn" hidden>Close</button>
+                </div>
                 <p id="models-install-status" class="field-hint" hidden></p>
               </div>
 
@@ -122,16 +148,25 @@
 
               <img id="live-preview" alt="" hidden />
               <video id="output-video" controls loop hidden></video>
-              <div class="scanlines"></div>
+              <div class="fx fx-scan"></div>
+              <div class="fx fx-glass"></div>
             </div>
           </div>
 
           <div id="tv-chin">
             <div id="tv-led" title="On air while generating"></div>
             <div id="tv-grille" aria-hidden="true"></div>
-            <div id="tv-knobs" aria-hidden="true">
-              <button type="button" class="tv-knob" tabindex="-1"></button>
-              <button type="button" class="tv-knob tv-knob-big" tabindex="-1"></button>
+            <div id="tv-knobs">
+              <div class="tv-knob-wrap">
+                <button type="button" id="knob-scan" class="tv-knob" aria-label="Scanlines and interference"></button>
+                <span class="tv-knob-label">SCAN</span>
+                <span class="tv-pips" data-for="scan"><i></i><i></i><i></i></span>
+              </div>
+              <div class="tv-knob-wrap">
+                <button type="button" id="knob-glass" class="tv-knob tv-knob-big" aria-label="CRT glass glow"></button>
+                <span class="tv-knob-label">GLASS</span>
+                <span class="tv-pips" data-for="glass"><i></i><i></i><i></i></span>
+              </div>
             </div>
           </div>
         </div>

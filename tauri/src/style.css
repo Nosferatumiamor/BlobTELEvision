@@ -427,16 +427,13 @@ button {
 #models-panel .models-row {
   text-align: left;
 }
-#models-panel #models-install-btn {
-  margin-top: 0.6rem;
-}
 #models-panel #models-install-status {
   white-space: pre-wrap;
   text-align: left;
 }
-/* whichever panel is on the screen replaces "Nothing on the air" */
-#output-box:has(#models-panel:not([hidden])) #output-empty,
-#output-box:has(#bootstrap-panel:not([hidden])) #output-empty {
+/* whichever panel is on the screen replaces "Nothing on the air" and any picture or video */
+#output-box:has(#models-panel:not([hidden])) > :is(#output-empty, #live-preview, #output-video),
+#output-box:has(#bootstrap-panel:not([hidden])) > :is(#output-empty, #live-preview, #output-video) {
   display: none;
 }
 
@@ -448,6 +445,28 @@ button {
   row-gap: 0.1rem;
   margin: 0.5rem 0;
   font-size: 0.9rem;
+}
+.models-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.models-uninstall {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+}
+.models-uninstall.confirm {
+  border-color: var(--err);
+  color: var(--err);
+}
+.models-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
 }
 .models-row-progress {
   flex-basis: 100%;
@@ -593,15 +612,216 @@ button {
   object-fit: contain;
 }
 
-/* scanlines + vignette + glass glare, above the picture but never clickable */
-.scanlines {
+/* --- CRT effects, driven by the two knobs (data-scan / data-glass = 0..3 on #output-box).
+   Both are OFF by default; the overlays never take clicks. --- */
+
+.fx {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+
+/* SCAN knob: scanlines, then a rolling bar + grain, then jitter */
+#output-box {
+  --scan-a: 0;
+  --glare: 0;
+  --vig: 0;
+  --glow: 0;
+}
+#output-box[data-scan="1"] {
+  --scan-a: 0.14;
+}
+#output-box[data-scan="2"] {
+  --scan-a: 0.24;
+}
+#output-box[data-scan="3"] {
+  --scan-a: 0.34;
+}
+#output-box:not([data-scan="0"]) .fx-scan {
+  opacity: 1;
+}
+.fx-scan {
+  overflow: hidden;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, var(--scan-a)) 0 1px, transparent 1px 3px);
+}
+/* rolling interference bar (level 2 slow, level 3 fast) */
+.fx-scan::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -30%;
+  height: 26%;
+  display: none;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.09), transparent);
+  animation: fx-roll 7s linear infinite;
+}
+/* grain */
+.fx-scan::after {
+  content: "";
+  position: absolute;
+  inset: -20px;
+  display: none;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  animation: fx-grain 0.5s steps(5) infinite;
+}
+#output-box[data-scan="2"] .fx-scan::before,
+#output-box[data-scan="3"] .fx-scan::before {
+  display: block;
+}
+#output-box[data-scan="3"] .fx-scan::before {
+  animation-duration: 3.2s;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.14), transparent);
+}
+#output-box[data-scan="2"] .fx-scan::after {
+  display: block;
+  opacity: 0.12;
+}
+#output-box[data-scan="3"] .fx-scan::after {
+  display: block;
+  opacity: 0.3;
+}
+@keyframes fx-roll {
+  to {
+    transform: translateY(560%);
+  }
+}
+@keyframes fx-grain {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-9px, 6px);
+  }
+  50% {
+    transform: translate(7px, -8px);
+  }
+  75% {
+    transform: translate(-5px, -4px);
+  }
+  100% {
+    transform: translate(8px, 7px);
+  }
+}
+/* picture jitter: mostly still, with short glitches */
+#output-box[data-scan="2"] > :is(#output-empty, #bootstrap-panel, #models-panel, #live-preview, #output-video) {
+  animation: fx-jitter 6s infinite;
+}
+#output-box[data-scan="3"] > :is(#output-empty, #bootstrap-panel, #models-panel, #live-preview, #output-video) {
+  animation: fx-jitter-heavy 2.4s infinite;
+}
+@keyframes fx-jitter {
+  0%,
+  92%,
+  100% {
+    transform: none;
+  }
+  94% {
+    transform: translateX(2px);
+  }
+  96% {
+    transform: translateX(-2px) skewX(0.6deg);
+  }
+}
+@keyframes fx-jitter-heavy {
+  0%,
+  70%,
+  100% {
+    transform: none;
+  }
+  72% {
+    transform: translateX(3px) skewX(-1deg);
+  }
+  75% {
+    transform: translate(-4px, 1px) skewX(1.2deg);
+  }
+  78% {
+    transform: translateX(2px);
+  }
+  90% {
+    transform: translateY(-1px) scaleY(1.01);
+  }
+  92% {
+    transform: translateX(-3px) skewX(0.8deg);
+  }
+}
+
+/* GLASS knob: glare, vignette, inner glow, bloom on the picture and text, then colour fringing */
+#output-box[data-glass="1"] {
+  --glare: 0.07;
+  --vig: 0.35;
+  --glow: 0.1;
+}
+#output-box[data-glass="2"] {
+  --glare: 0.11;
+  --vig: 0.5;
+  --glow: 0.18;
+}
+#output-box[data-glass="3"] {
+  --glare: 0.16;
+  --vig: 0.65;
+  --glow: 0.28;
+}
+#output-box:not([data-glass="0"]) .fx-glass {
+  opacity: 1;
+}
+.fx-glass {
   background:
-    radial-gradient(ellipse at 30% 15%, rgba(255, 255, 255, 0.08), transparent 45%),
-    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%),
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
+    radial-gradient(ellipse at 28% 12%, rgba(255, 255, 255, var(--glare)), transparent 42%),
+    radial-gradient(ellipse at center, transparent 48%, rgba(0, 0, 0, var(--vig)) 100%);
+  box-shadow: inset 0 0 55px rgba(120, 190, 255, var(--glow));
+}
+#output-box[data-glass="1"] > :is(#live-preview, #output-video) {
+  filter: brightness(1.04) contrast(1.06) saturate(1.1) drop-shadow(0 0 8px rgba(130, 200, 255, 0.25));
+}
+#output-box[data-glass="2"] > :is(#live-preview, #output-video) {
+  filter: brightness(1.08) contrast(1.12) saturate(1.25) drop-shadow(0 0 14px rgba(130, 200, 255, 0.4));
+}
+#output-box[data-glass="3"] > :is(#live-preview, #output-video) {
+  filter: brightness(1.1) contrast(1.18) saturate(1.4) drop-shadow(2px 0 0 rgba(255, 40, 40, 0.35))
+    drop-shadow(-2px 0 0 rgba(40, 220, 255, 0.35)) drop-shadow(0 0 20px rgba(130, 200, 255, 0.5));
+}
+#output-box:not([data-glass="0"]) > :is(#output-empty, #bootstrap-panel, #models-panel) {
+  text-shadow: 0 0 8px rgba(160, 220, 255, 0.5);
+}
+#output-box[data-glass="3"] > :is(#output-empty, #bootstrap-panel, #models-panel) {
+  text-shadow:
+    1.5px 0 0 rgba(255, 60, 60, 0.45),
+    -1.5px 0 0 rgba(60, 220, 255, 0.45),
+    0 0 12px rgba(160, 220, 255, 0.6);
+}
+#output-box[data-glass="2"] .fx-glass,
+#output-box[data-glass="3"] .fx-glass {
+  animation: fx-flicker 3.4s infinite;
+}
+@keyframes fx-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  47% {
+    opacity: 1;
+  }
+  49% {
+    opacity: 0.72;
+  }
+  52% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-scan::before,
+  .fx-scan::after,
+  .fx-glass {
+    animation: none !important;
+  }
+  #output-box > * {
+    animation: none !important;
+  }
 }
 
 #tv-chin {
@@ -681,7 +901,40 @@ button {
   box-shadow:
     0 3px 6px rgba(0, 0, 0, 0.6),
     inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  transform: rotate(var(--a, -130deg));
   transition: transform 0.35s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.tv-knob:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
+}
+.tv-knob-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.tv-knob-label {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #3b342a;
+}
+.tv-pips {
+  display: flex;
+  gap: 3px;
+}
+.tv-pips i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6f685a;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+.tv-pips i.on {
+  background: #ffd23f;
+  box-shadow: 0 0 4px #ffb300;
 }
 .tv-knob::after {
   content: "";
