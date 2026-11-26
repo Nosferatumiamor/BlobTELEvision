@@ -32,8 +32,8 @@ if not exist node_modules (
 call npm run tauri dev
 if errorlevel 1 (
     echo.
-    echo BlobTELEvision a plante - voir l'erreur ci-dessus.
+    echo BlobTELEvision a plante ou le build a echoue - voir l'erreur ci-dessus.
+    echo Appuie sur une touche pour fermer cette fenetre.
+    pause >nul
 )
-echo.
-echo  BlobTELEvision ferme. Appuie sur une touche pour fermer cette fenetre.
-pause >nul
+exit /b 0

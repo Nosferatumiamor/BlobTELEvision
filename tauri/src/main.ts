@@ -115,9 +115,8 @@ const outputEmptyEl = $<HTMLDivElement>("#output-empty");
 const emptyHintEl = $<HTMLParagraphElement>("#empty-hint");
 const livePreviewEl = $<HTMLImageElement>("#live-preview");
 const outputVideoEl = $<HTMLVideoElement>("#output-video");
-const progressWrapEl = $<HTMLDivElement>("#progress-wrap");
-const progressFillEl = $<HTMLDivElement>("#progress-fill");
-const progressTextEl = $<HTMLSpanElement>("#progress-text");
+const useFrameBtn = $<HTMLButtonElement>("#use-frame-btn");
+const initFromTvBtn = $<HTMLButtonElement>("#init-from-tv");
 const jobLogEl = $<HTMLPreElement>("#job-log");
 const galleryEl = $<HTMLDivElement>("#gallery");
 const upscaleEl = $<HTMLSelectElement>("#upscale");
@@ -398,10 +397,69 @@ initDropEl.addEventListener("dragover", (e) => {
 initDropEl.addEventListener("dragleave", () => initDropEl.classList.remove("over"));
 initDropEl.addEventListener("drop", (e) => {
   e.preventDefault();
+  e.stopPropagation(); // the window-level handler would load it a second time
   initDropEl.classList.remove("over");
-  const f = e.dataTransfer?.files?.[0];
-  if (f && f.type.startsWith("image/")) void setInitFile(f);
+  useDroppedImage(e.dataTransfer?.files?.[0]);
 });
+
+// Drop an image anywhere on the window: it becomes the source image (switching to image -> videslop).
+// Without this, a drop that misses the box would make the webview navigate to the file.
+function hasFiles(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+}
+function useDroppedImage(f: File | undefined) {
+  if (!f || !f.type.startsWith("image/")) return;
+  switchToI2v();
+  void setInitFile(f);
+}
+function switchToI2v() {
+  if (currentKind() === "i2v") return;
+  const r = document.querySelector<HTMLInputElement>('input[name="mode"][value="i2v"]');
+  if (r) {
+    r.checked = true;
+    applyMode();
+  }
+}
+document.addEventListener("dragover", (e) => {
+  if (hasFiles(e)) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  useDroppedImage(e.dataTransfer?.files?.[0]);
+});
+
+// Use the frame currently showing on the TV (a finished videslop picked from the shelf) as the source image.
+function tvFrameReady(): boolean {
+  return !outputVideoEl.hidden && outputVideoEl.videoWidth > 0 && outputVideoEl.readyState >= 2;
+}
+function updateFrameButtons() {
+  const ok = tvFrameReady() && !generating;
+  useFrameBtn.hidden = !ok;
+  initFromTvBtn.disabled = !ok;
+}
+async function useTvFrame() {
+  if (!tvFrameReady()) return;
+  outputVideoEl.pause();
+  const canvas = document.createElement("canvas");
+  canvas.width = outputVideoEl.videoWidth;
+  canvas.height = outputVideoEl.videoHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  try {
+    ctx.drawImage(outputVideoEl, 0, 0);
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/png"));
+    if (!blob) throw new Error("could not read the frame");
+    switchToI2v();
+    await setInitFile(new File([blob], "tv-frame.png", { type: "image/png" }));
+  } catch (err) {
+    initHintEl.hidden = false;
+    initHintEl.textContent = "Frame capture failed: " + (err as Error).message;
+  }
+}
+useFrameBtn.addEventListener("click", () => void useTvFrame());
+initFromTvBtn.addEventListener("click", () => void useTvFrame());
+["loadeddata", "emptied", "seeked", "pause", "play"].forEach((ev) => outputVideoEl.addEventListener(ev, updateFrameButtons));
 
 // ---------------------------------------------------------------- fast reboot
 async function initFastBoot() {
@@ -878,10 +936,12 @@ function showOutputState(state: "empty" | "preview" | "video") {
   livePreviewEl.hidden = state !== "preview";
   outputVideoEl.hidden = state !== "video";
   if (state !== "video") outputVideoEl.pause();
+  updateFrameButtons();
 }
 
 function showVideo(url: string) {
   showOutputState("video");
+  updateFrameButtons();
   outputVideoEl.src = API_BASE + url + "?t=" + Date.now();
   void outputVideoEl.play().catch(() => {});
   document.querySelectorAll(".gallery-item").forEach((el) => {
@@ -914,14 +974,6 @@ function stopPreviewPolling() {
 
 function renderProgress(job: JobSnapshot) {
   tvSet("gen", job.total > 0 ? job.step / job.total : null);
-  if (job.total > 0) {
-    const pct = Math.min(100, Math.round((job.step / job.total) * 100));
-    progressFillEl.style.width = pct + "%";
-    progressTextEl.textContent = (job.phase ? job.phase + " " : "step ") + job.step + " / " + job.total;
-  } else {
-    progressFillEl.style.width = "0%";
-    progressTextEl.textContent = job.phase || (job.lines.length ? job.lines[job.lines.length - 1].slice(0, 60) : "");
-  }
   jobLogEl.textContent = job.lines.join("\n");
   jobLogEl.scrollTop = jobLogEl.scrollHeight;
 }
@@ -931,7 +983,7 @@ function setGenerating(on: boolean) {
   tvSet("gen", on ? null : undefined);
   generateBtn.hidden = on;
   abortBtn.hidden = !on;
-  progressWrapEl.hidden = !on && jobLogEl.hidden;
+  updateFrameButtons();
   updateGenerateEnabled();
 }
 
@@ -942,11 +994,7 @@ async function onGenerate() {
     return;
   }
   setGenerating(true);
-  progressWrapEl.hidden = false;
-  jobLogEl.hidden = false;
-  jobLogEl.textContent = "";
-  progressFillEl.style.width = "0%";
-  progressTextEl.textContent = "starting...";
+  jobLogEl.textContent = "starting...";
   showOutputState("empty");
   emptyHintEl.textContent = "Warming up the tubes...";
   setEngineStatus("Generating...", "status-pending");

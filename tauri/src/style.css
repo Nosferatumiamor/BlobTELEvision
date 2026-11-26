@@ -160,13 +160,14 @@ body {
 .side-col {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.7rem;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   overflow-y: auto;
-  max-height: calc(100vh - 6rem);
+  /* 17rem = header + page padding + the video shelf, so the page itself never scrolls */
+  max-height: calc(100vh - 17.2rem);
 }
 
 .field {
@@ -340,7 +341,7 @@ button {
 
 .drop-zone {
   position: relative;
-  min-height: 110px;
+  min-height: 84px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -359,6 +360,38 @@ button {
   max-height: 200px;
   object-fit: contain;
 }
+.screen-btn {
+  position: absolute;
+  top: 7%;
+  right: 9%;
+  z-index: 5;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(12, 10, 18, 0.78);
+  color: #fff;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.screen-btn[hidden] {
+  display: none;
+}
+#output-box:hover .screen-btn,
+.screen-btn:focus-visible {
+  opacity: 1;
+}
+#init-from-tv {
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+}
+#init-from-tv:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .drop-zone input[type="file"] {
   position: absolute;
   inset: 0;
@@ -587,8 +620,8 @@ button {
 
 #output-box {
   position: relative;
-  /* 27rem = everything on the page that is not the screen (header, TV frame, shelf) */
-  width: min(100%, calc((100vh - 27rem) * 4 / 3));
+  /* 29.2rem = everything on the page that is not the screen (header, TV frame, shelf) */
+  width: min(100%, calc((100vh - 29.2rem) * 4 / 3));
   min-width: 280px;
   aspect-ratio: 4 / 3;
   margin: 0 auto;
@@ -826,9 +859,42 @@ button {
 
 #tv-chin {
   display: flex;
+  align-items: stretch;
+  gap: 1.1rem;
+  padding: 12px 8px 14px;
+}
+#tv-chin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#tv-chin-top {
+  display: flex;
   align-items: center;
   gap: 1.1rem;
-  padding: 14px 8px 16px;
+}
+/* the console is a small dark window set into the TV frame, under the speaker grille */
+#tv-chin #job-log {
+  flex: 1;
+  margin: 0;
+  height: 4.2rem;
+  min-height: 4.2rem;
+  max-height: 4.2rem;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: #0b0912;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: #b9d9b0;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.8),
+    0 1px 0 rgba(255, 255, 255, 0.12);
+}
+#tv-knobs {
+  align-self: center;
 }
 
 #tv-led {
@@ -854,8 +920,8 @@ button {
   flex: 1;
   display: flex;
   gap: 3px;
-  height: 34px;
-  padding: 5px 6px;
+  height: 28px;
+  padding: 4px 6px;
   border-radius: 6px;
   background: #24170f;
   box-shadow:
@@ -985,31 +1051,6 @@ button {
   margin: 0 0 0.4rem;
   font-size: 1.2rem;
   color: var(--muted);
-}
-
-#progress-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-}
-#progress-bar {
-  flex: 1;
-  height: 10px;
-  background: var(--panel-2);
-  border-radius: 999px;
-  overflow: hidden;
-}
-#progress-fill {
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  transition: width 0.25s ease;
-}
-#progress-text {
-  font-size: 0.8rem;
-  color: var(--muted);
-  min-width: 9rem;
-  text-align: right;
 }
 
 #gallery-bar {

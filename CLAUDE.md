@@ -63,6 +63,9 @@ Type-check the frontend with `npx tsc --noEmit` from `tauri/`.
   in the PNAKOTUS-V2 repo (same Real-ESRGAN + RIFE tools), without its compression logic.
 - `app/python/blobtv_paths.py`: all path layout. Always resolve paths through it (portable app, no cwd assumptions).
 - `tauri/src/main.ts` + `index.html` + `style.css`: single-panel frontend, no framework.
+  Image -> videslop sources: file picker, drop anywhere on the window (the webview must keep `dragDropEnabled: false`),
+  or a frame captured from the video on the TV (the `<video>` has `crossorigin` and the API sends CORS headers, otherwise the canvas is tainted).
+  The page must not scroll: the screen width in `#output-box` and `.side-col` max-height both reserve the other elements' height in rem.
 
 ## Conventions and gotchas
 
