@@ -113,6 +113,7 @@ const modelsInstallBtnEl = $<HTMLButtonElement>("#models-install-btn");
 const modelsInstallStatusEl = $<HTMLParagraphElement>("#models-install-status");
 const outputEmptyEl = $<HTMLDivElement>("#output-empty");
 const emptyHintEl = $<HTMLParagraphElement>("#empty-hint");
+const outputTitleEl = $<HTMLParagraphElement>("#output-title");
 const livePreviewEl = $<HTMLImageElement>("#live-preview");
 const outputVideoEl = $<HTMLVideoElement>("#output-video");
 const useFrameBtn = $<HTMLButtonElement>("#use-frame-btn");
@@ -972,8 +973,27 @@ function stopPreviewPolling() {
   }
 }
 
+// While no video or preview is on the screen (model load/swap, i2v denoising, encoding), say on the
+// screen itself what the engine is doing and for how long, instead of a static "warming up" line.
+let screenPhase = "";
+let screenPhaseSince = 0;
+function renderScreenStatus(job: JobSnapshot) {
+  if (outputEmptyEl.hidden || !job.phase) return;
+  if (job.phase !== screenPhase) {
+    screenPhase = job.phase;
+    screenPhaseSince = Date.now();
+  }
+  const secs = Math.round((Date.now() - screenPhaseSince) / 1000);
+  const loading = /^(Loading|Unloading)/.test(job.phase);
+  outputTitleEl.textContent = job.total > 0 ? job.phase + " " + job.step + " / " + job.total : job.phase + "...";
+  emptyHintEl.textContent = loading
+    ? "Swapping models: reading the weights from disk can take a while the first time. " + secs + " s"
+    : secs + " s";
+}
+
 function renderProgress(job: JobSnapshot) {
   tvSet("gen", job.total > 0 ? job.step / job.total : null);
+  renderScreenStatus(job);
   jobLogEl.textContent = job.lines.join("\n");
   jobLogEl.scrollTop = jobLogEl.scrollHeight;
 }
@@ -994,6 +1014,8 @@ async function onGenerate() {
     return;
   }
   setGenerating(true);
+  screenPhase = "";
+  outputTitleEl.textContent = "Nothing on the air";
   jobLogEl.textContent = "starting...";
   showOutputState("empty");
   emptyHintEl.textContent = "Warming up the tubes...";
@@ -1060,6 +1082,7 @@ async function onGenerate() {
 
 function finishGeneration(status: string, cls: "status-pending" | "status-ok" | "status-error") {
   stopPreviewPolling();
+  outputTitleEl.textContent = "Nothing on the air";
   setGenerating(false);
   setEngineStatus(status, cls);
   if (cls === "status-error") {

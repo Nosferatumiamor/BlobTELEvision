@@ -245,7 +245,12 @@ class TelevisionEngine:
         except Exception:
             pass
 
-    def ensure_loaded(self, kind: str, on_progress: Optional[Callable[[str], None]] = None):
+    def ensure_loaded(
+        self,
+        kind: str,
+        on_progress: Optional[Callable[[str], None]] = None,
+        on_phase: Optional[Callable[[str], None]] = None,
+    ):
         with self._lock:
             if self._kind == kind and self._pipe is not None:
                 return self._pipe
@@ -262,7 +267,11 @@ class TelevisionEngine:
                 if self._pipe is not None:
                     if on_progress:
                         on_progress("Unloading {}...".format(self._kind))
+                    if on_phase:
+                        on_phase("Unloading {}".format(MODELS[self._kind]["label"]))
                     self.unload()
+                if on_phase:
+                    on_phase("Loading {}".format(MODELS[kind]["label"]))
                 if on_progress:
                     on_progress("Loading {} (importing torch/diffusers the first time can take a minute)...".format(
                         MODELS[kind]["label"]))
@@ -327,7 +336,7 @@ class TelevisionEngine:
 
         blobtv_cancel.clear()
         with self._lock:
-            pipe = self.ensure_loaded(p.kind, on_progress)
+            pipe = self.ensure_loaded(p.kind, on_progress, on_phase)
             if p.seed is None or p.seed < 0:
                 p.seed = int.from_bytes(os.urandom(4), "little")
             generator = torch.Generator(device="cpu").manual_seed(int(p.seed))
@@ -475,15 +484,6 @@ class TelevisionEngine:
 
         name = build_output_name("T" if p.kind == "t2v" else "I", p.prompt or "video", ".mp4")
         path = os.path.join(outputs_dir(), name)
-        imageio.mimwrite(
-            path,
-            list(frames),
-            fps=int(p.fps) * max(1, int(p.interp or 1)),
-            codec="libx264",
-            quality=8,
-            pixelformat="yuv420p",
-            macro_block_size=2,
-        )
         meta = {
             "app": "blobtelevision",
             "kind": p.kind,
@@ -502,6 +502,19 @@ class TelevisionEngine:
             "height": p.height,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as fh:
-            json.dump(meta, fh, indent=2)
+        # The parameters travel inside the MP4 itself (no .json file next to it): `comment` holds
+        # the full JSON, `title` the prompt, so Explorer's Details tab shows both.
+        imageio.mimwrite(
+            path,
+            list(frames),
+            fps=int(p.fps) * max(1, int(p.interp or 1)),
+            codec="libx264",
+            quality=8,
+            pixelformat="yuv420p",
+            macro_block_size=2,
+            output_params=[
+                "-metadata", "title=" + (p.prompt or "video"),
+                "-metadata", "comment=" + json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
+            ],
+        )
         return {"filename": name, "path": path, "metadata": meta}

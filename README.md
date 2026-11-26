@@ -34,7 +34,7 @@ Tips:
   RIFE to insert frames between the real ones (x2 or x4 frames *and* fps, so the clip keeps its duration).
   Ugly is allowed, that is the point. These tools are a small one-time download, asked for only when you
   pick an option that needs them (Real-ESRGAN about 140 MB, RIFE about 430 MB to download, much less on disk).
-- The seed is saved with every video (a `.json` file sits next to each `.mp4`), so you can reproduce a result.
+- The generation parameters (prompt, seed, steps, format...) are saved inside every video's metadata (title = prompt, comment = full JSON; see Properties > Details in Explorer), so you can reproduce a result without any extra file.
 - **Fast reboot** keeps the models loaded for 30 minutes if you closed the program by accident.
 
 ## Hardware and requirements
