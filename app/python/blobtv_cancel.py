@@ -1,4 +1,4 @@
-"""Cooperative cancel flag for long VQGAN optimisation runs."""
+"""Cooperative cancel flag for the long diffusion loops (checked once per step)."""
 import threading
 
 _lock = threading.Lock()

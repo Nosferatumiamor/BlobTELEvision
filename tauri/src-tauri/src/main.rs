@@ -1,7 +1,7 @@
-// BlobVision desktop shell (foundation).
+// BlobTELEvision desktop shell.
 //
-// Replaces pywebview + Gradio: this Rust process spawns the existing Python
-// FastAPI engine (app/python/blobvision_api.py) as a child process on
+// This Rust process spawns the Python
+// FastAPI engine (app/python/blobtv_api.py) as a child process on
 // startup, opens a native window pointed at the Vite frontend, and kills the
 // Python process when the window closes. The frontend talks to the Python
 // API directly over HTTP (see tauri/src/main.ts) — this shell does no
@@ -23,16 +23,16 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use tauri::Manager;
 
-// Must match API_BASE in tauri/src/main.ts. Deliberately not 7860 (the
-// Gradio app's default) so both can run side by side during the migration.
-const API_PORT: &str = "8420";
+// Must match API_BASE in tauri/src/main.ts. Deliberately not 8420 (BlobVision's
+// port) so both apps can run side by side.
+const API_PORT: &str = "8421";
 
 // "Fast boot": when on, closing the window doesn't kill the Python engine —
 // it keeps running so the next launch can reconnect to it instead of paying
 // the full cold-load cost again. Two safety nets keep this from silently
 // eating resources forever: it never survives an actual OS reboot/logoff
 // (nothing OS-level preserves it — that's just how processes work, no code
-// needed), and blobvision_api.py runs its own idle-timeout thread that
+// needed), and blobtv_api.py runs its own idle-timeout thread that
 // self-exits after IDLE_TIMEOUT_SECONDS of no requests reaching it, whether
 // or not this app ever reconnects. Persisted to a plain settings.json next
 // to the repo root (not Tauri's own store plugin, to keep this one small
@@ -101,7 +101,7 @@ fn try_reuse_existing_engine() -> bool {
 struct PythonEngine(Mutex<Option<Child>>);
 
 // Portable path resolution: walks up from the RUNNING EXE'S OWN location
-// looking for the sibling app/python/blobvision_api.py that marks the repo
+// looking for the sibling app/python/blobtv_api.py that marks the repo
 // root — mirrors how blobvision_paths.py resolves BLOBVISION_ROOT from
 // __file__ instead of cwd, so this works the same way regardless of where
 // the portable app folder was copied to. Replaces an earlier version that
@@ -124,15 +124,15 @@ fn repo_root() -> PathBuf {
         .expect("exe path should have a parent directory")
         .to_path_buf();
     loop {
-        let api_script = dir.join("app").join("python").join("blobvision_api.py");
+        let api_script = dir.join("app").join("python").join("blobtv_api.py");
         if api_script.is_file() {
             return dir;
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
             None => panic!(
-                "Could not find the BlobVision repo root (app/python/blobvision_api.py) \
-                 by walking up from {}. Is this exe still inside the portable BlobVision \
+                "Could not find the BlobTELEvision repo root (app/python/blobtv_api.py) \
+                 by walking up from {}. Is this exe still inside the portable BlobTELEvision \
                  folder?",
                 exe.display()
             ),
@@ -241,30 +241,11 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
             format!("{} not found under venv/ (checked both venv/Scripts/ and venv/) even after bootstrap", python_exe_name),
         )
     })?;
-    let api_script = root.join("app").join("python").join("blobvision_api.py");
+    let api_script = root.join("app").join("python").join("blobtv_api.py");
 
-    // Mirrors app/run.ps1's env vars for the Gradio launcher: the app expects
-    // model weights to already be present locally and must not silently hit
-    // the network mid-session (see CLAUDE.md).
-    //
-    // BLOBVISION_SKETCH_FULL_GPU is deliberately NOT set here — let
-    // resolve_sketch_full_gpu() in blobvision_engine.py auto-detect from
-    // actual free VRAM instead of hardcoding a mode for every machine. This
-    // used to force "0" (CPU-offload) unconditionally, based on an earlier
-    // finding that full-GPU mode made VQGAN's own optimization loop 5-9x
-    // slower "right at the edge of OOM" on whatever card that was measured
-    // on. Re-measured on a 12.9GB card (real A/B test: 4 redux generations
-    // in each mode): VQGAN's steady-state it/s was statistically identical
-    // between the two modes (~3.3-3.4 it/s either way), and total time per
-    // generation was within ~1s of each other — full-GPU's park/unpark
-    // overhead roughly cancels out CPU-offload's own per-step shuffling
-    // cost. The one clear difference was SDXL's own load+warmup time: ~90s
-    // full-GPU vs ~170-180s CPU-offload on the same card. The old "5-9x
-    // slower" finding doesn't reproduce here — it was presumably measured
-    // on a card with much less VRAM headroom, which auto-detect already
-    // handles correctly (falls back to CPU-offload below its own
-    // total>=11GB / free>=7GB threshold). Hardcoding one mode for every
-    // machine was strictly worse than letting that threshold decide.
+    // The app expects model weights to already be present locally and must not
+    // silently hit the network mid-session. Downloads are the one deliberate
+    // exception (blobtv_engine.enable_hub_downloads flips this back on for them).
     let mut cmd = Command::new(python);
     cmd.arg(api_script)
         .arg("--port")
@@ -313,7 +294,7 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
         //    (SDXL placement check, warmup progress, etc.) end to end.
         //
         // Stdio::piped() was tried before Stdio::inherit() and rejected
-        // for a different, still-true reason: blobvision_engine.py's
+        // for a different, still-true reason: blobtv_api.py's
         // frequent print(..., flush=True) calls raised OSError(22) against
         // an anonymous pipe on Windows. A real log FILE avoids that too —
         // no "nobody's reading the other end" failure mode the way a pipe
@@ -327,7 +308,7 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
         cmd.creation_flags(CREATE_NO_WINDOW);
         let log_dir = root.join("logs");
         let _ = fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join("blobvision-api.log");
+        let log_path = log_dir.join("blobtelevision-api.log");
         if let Ok(log_file) = File::create(&log_path) {
             if let Ok(err_file) = log_file.try_clone() {
                 cmd.stdout(Stdio::from(log_file))
@@ -342,7 +323,7 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
     cmd.spawn().map(Some)
 }
 
-// Mirrors blobvision_ui.py's open_gallery(): opens the output folder in
+// Opens the output folder in
 // Explorer. All families now share one flat outputs/ folder (see this
 // session's outputs-restructuring work — filenames carry a V/D/S/M type
 // tag instead of a subfolder), so there's no per-family subdir to resolve
@@ -382,7 +363,7 @@ fn read_bootstrap_log(offset: u64) -> Result<(String, u64), String> {
 
 // Deliberately does NOT call repo_root() — if repo_root() itself is what
 // panicked (its own marker-file walk-up can panic!() if it never finds
-// app/python/blobvision_api.py), calling it again just to find where to
+// app/python/blobtv_api.py), calling it again just to find where to
 // log that would panic a second time and lose the message entirely.
 // current_exe()'s own parent directory is exactly where repo_root() would
 // resolve to in the overwhelming common case anyway (the exe sitting at
@@ -454,7 +435,7 @@ fn main() {
                         *state.0.lock().unwrap() = child;
                     }
                     Ok(Err(err)) => {
-                        write_startup_error(&format!("Failed to start blobvision_api.py: {err}"));
+                        write_startup_error(&format!("Failed to start blobtv_api.py: {err}"));
                     }
                     Err(panic_payload) => {
                         let msg = panic_payload
@@ -471,7 +452,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building the BlobVision Tauri application")
+        .expect("error while building the BlobTELEvision Tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<PythonEngine>();
@@ -479,7 +460,7 @@ fn main() {
                 if fast_boot_enabled(&repo_root()) {
                     // Leave it running — see the Settings/fast_boot doc
                     // comment above for the two things that end it anyway
-                    // (an OS reboot, or blobvision_api.py's own idle
+                    // (an OS reboot, or blobtv_api.py's own idle
                     // timeout). Just dropping child_opt here does NOT kill
                     // it (Child has no kill-on-drop behavior), so this is
                     // the entire "leave it alone" branch. Also skips the
@@ -495,7 +476,7 @@ fn main() {
                 }
                 // child.kill() is a hard TerminateProcess on Windows, so
                 // Python never gets a chance to run its own atexit cleanup
-                // (see blobvision_api.py's) — sweep the uploads scratch dir
+                // (see blobtv_api.py's) — sweep the uploads scratch dir
                 // here instead, best-effort. outputs/ itself and its sketch/
                 // subfolder are real kept content and are never touched.
                 let _ = fs::remove_dir_all(repo_root().join("outputs").join("uploads"));

@@ -1,5 +1,5 @@
 # Bootstraps a working Python environment from scratch on a machine that has
-# never run BlobVision before -- no system Python, no venv, nothing. This is
+# never run BlobTELEvision before -- no system Python, no venv, nothing. This is
 # what makes the app installable on someone else's machine instead of only
 # working here where a virtualenv-created venv/ already exists (that venv's
 # own python.exe is NOT relocatable -- see tauri/src-tauri/src/main.rs's
@@ -60,7 +60,7 @@ if (-not (Test-Path $requirementsPath)) {
     throw "Missing $requirementsPath -- can't bootstrap without the frozen package list."
 }
 
-$tempDir = Join-Path $env:TEMP ("blobvision-bootstrap-" + [guid]::NewGuid().ToString("N"))
+$tempDir = Join-Path $env:TEMP ("blobtelevision-bootstrap-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 try {
     $embedZipUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
@@ -112,7 +112,7 @@ try {
     # need PyTorch's own CUDA-specific index, not plain PyPI, and the right
     # build depends on what this app already assumes about the target
     # machine (an NVIDIA GPU -- see resolve_sketch_full_gpu in
-    # blobvision_engine.py, which has no real CPU-only path anyway).
+    # blobtv_engine.py, which has no real CPU-only path anyway).
     # torchaudio is deliberately NOT installed: nothing in the app imports
     # it (verified against the actual shipped code, not assumed) -- it was
     # only ever installed because it's what PyTorch's own docs tell you to

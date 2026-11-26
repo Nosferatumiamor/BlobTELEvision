@@ -1,7 +1,7 @@
 [package]
-name = "blobvision"
+name = "blobtelevision"
 version = "0.1.0"
-description = "BlobVision desktop shell"
+description = "BlobTELEvision desktop shell"
 edition = "2021"
 rust-version = "1.77"
 

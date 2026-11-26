@@ -1,43 +1,31 @@
-# BlobVision V1
+# BlobTELEvision
 
 # Python
 venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-.pytest_cache/
-.ipynb_checkpoints/
 
-# Downloaded weights (install on first launch via in-app buttons or app/scripts/)
+# Downloaded weights (installed on first launch via the in-app Download button)
 models/*
 !models/README.txt
-models/hf_cache/
 
-# Generated outputs
+# Generated outputs and scratch space
 outputs/*
 !outputs/.gitkeep
+work/
 
-# Bundled video tools (run Setup Video Codecs.bat once)
-video-codecs/ffmpeg/
-video-codecs/rife/
-!video-codecs/README.txt
-
-# Legacy app-local caches (migrated to models/ on first run)
-app/checkpoints/
-app/outputs/
-app/style-transfer/weights/
-app/style-transfer/samples/
-taming-transformers/
-
-# Safety net — never commit weights
+# Safety net: never commit weights
 *.ckpt
 *.safetensors
 *.pth
+*.bin
 
 # Local logs
 *.log
+logs/
 
-# Per-install local settings (e.g. the fast-boot toggle)
+# Per-install local settings (e.g. the fast-reboot toggle)
 /settings.json
 
 # OS / editor
@@ -48,7 +36,7 @@ Thumbs.db
 .cursor/
 .claude/
 
-# Tauri shell (tauri/) — npm/cargo build artifacts, not source
+# Tauri shell (tauri/): npm/cargo build artifacts, not source
 tauri/node_modules/
 tauri/dist/
 tauri/src-tauri/target/

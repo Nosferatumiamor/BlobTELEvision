@@ -4,125 +4,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-BlobVision is a portable Windows desktop app that emulates old/legacy generative-AI image and video
-pipelines behind a single Gradio UI, wrapped in a native PyWebView window (no browser tab). Three
-independent "families" of generation, switchable in the UI:
+BlobTELEvision is the video sibling of BlobVision (same author, forked from it): a portable Windows
+desktop app (Tauri shell + Python FastAPI engine) that emulates the first, hilariously cursed
+generative-AI video models. It does one thing, in two modes:
 
-- **VQGAN+CLIP** (`app/generate.py` + `blobvision_engine.py`) — three modes: `legacy` (pure VQGAN+CLIP
-  optimization loop, optional init image), `redux` (SDXL Turbo generates a sketch first, then VQGAN+CLIP
-  "blobifies" it — the fast default), `video` (upload a clip, VQGAN blobifies keyframes, RIFE
-  interpolates back up to full frame rate).
-- **DeepDream** (`blobvision_deepdream.py`) — InceptionV3 layer-activation dreaming, with `redux`
-  (SDXL sketch → DeepDream) and `img2img` variants.
-- **Style Transfer** (`blobvision_style.py`) — classic VGG19 Gatys optimization (content + style image in).
+- **text to video**: ModelScope text-to-video (`damo-vilab/text-to-video-ms-1.7b`, 2023, trained at 256 px).
+- **image to video**: I2VGen-XL (`ali-vilab/i2vgen-xl`), optional second download.
 
-The pitch is literally "old AI, made controllable": SDXL Turbo is used only to generate a clean sketch
-that the legacy models (VQGAN+CLIP, InceptionV3, VGG19) then process, so the historical model's
-aesthetic still dominates the output but composition is steerable.
+Both run through `diffusers` (`TextToVideoSDPipeline`, `I2VGenXLPipeline`) from fp16 safetensors, one
+model resident on the GPU at a time. There are no image models, no VQGAN/CLIP/DeepDream/Style Transfer
+and no SDXL: those live in BlobVision and were deliberately stripped from this fork.
 
-## Running the app
+## Running
 
-No package.json/pyproject — everything runs through the `venv/` created on first launch.
+No test suite, linter or CI. Dev setup mirrors BlobVision:
 
 ```
-BlobVision.bat                      # normal entry point: kills stale instances, launches native window
-app\run.ps1                         # what the .bat calls; sets offline/proxy env vars
-venv\Scripts\python.exe app\python\blobvision_app.py [--lazy] [--port 7860] [--debug]
+BlobTELEvision-Dev.bat                 # npm run tauri dev (recompiles Rust each launch)
+BlobTELEvision.bat                     # runs tauri/src-tauri/target/release/blobtelevision.exe
+cd tauri && npm run tauri build        # release exe + NSIS installer (target/release/bundle/nsis/)
+venv\Scripts\python.exe app\python\blobtv_api.py --port 8421    # backend alone (Swagger at /docs)
+cd tauri && npx vite --host 127.0.0.1   # frontend alone in a browser, against a running backend
 ```
 
-- `blobvision_app.py` is the desktop launcher: builds the Gradio app from `blobvision_ui.py`, starts it
-  in-process (`demo.launch(..., prevent_thread_lock=True)`), waits for the port, then opens a PyWebView
-  native window pointed at `http://127.0.0.1:<port>`. Falls back to a real browser tab if PyWebView fails.
-- `blobvision_ui.py` can also be run directly (`python app/python/blobvision_ui.py`) for a plain
-  browser-based Gradio server — useful when iterating on UI without the native window.
-- `blobvision_api.py` exposes the same generation engine over FastAPI/HTTP (Legacy/Redux/Corrupt) instead
-  of Gradio, for programmatic/headless use.
-- `--lazy` opens the UI without loading any models until the user presses **Start** (models normally
-  warm up in a background thread on launch).
-- There is no test suite, linter, or build step configured in this repo.
+Type-check the frontend with `npx tsc --noEmit` from `tauri/`.
 
-## Environment / dependencies
+## Architecture
 
-- `app/requirements-blobvision.txt` pins the ML stack: transformers, diffusers (SDXL Turbo), accelerate,
-  safetensors, gradio, pywebview, imageio(-ffmpeg).
-- `venv/`, `models/`, `outputs/`, `video-codecs/ffmpeg|rife/` are all gitignored — local install only.
-  Weights are fetched on demand via in-app **Install** buttons or the scripts in `app/scripts/`
-  (`download_sdxl_turbo.py`, `download_openclip_local.py`, `download_style_transfer.py`).
-- `HF_HUB_OFFLINE`/`TRANSFORMERS_OFFLINE` are forced to `1` at launch — the app expects weights to
-  already be present locally and will not silently hit the network mid-session.
-- `Setup Video Codecs.bat` installs bundled ffmpeg + RIFE into `video-codecs/` for the video mode's
-  frame interpolation; without it, video mode degrades gracefully (checked via
-  `video_codecs_status()` / `_video_codecs_ready()`).
+- `tauri/src-tauri/src/main.rs`: spawns `pythonw.exe app/python/blobtv_api.py --port 8421` (python.exe in
+  dev), bootstraps a relocatable venv on a fresh machine (`app/scripts/bootstrap_venv.ps1`, reads
+  `app/requirements-frozen.txt`), implements "Fast reboot" (leave the engine alive after the window closes;
+  the API exits by itself after 30 idle minutes) and reuses an already-running engine on port 8421.
+  `app/` is bundled as a Tauri resource, so **Python changes need a rebuild to reach the shipped exe**.
+- `app/python/blobtv_api.py`: FastAPI. Jobs are polled (`POST /generate` -> `GET /jobs/{id}`), model install
+  is fire-and-forget (`POST /models/install`, poll `/models/status`), `/cancel` sets a cooperative flag.
+- `app/python/blobtv_engine.py`: model registry (`MODELS`), weights status/download, the engine. Importing it
+  must stay cheap (no torch/diffusers at module level) so `/health` and `/models/status` answer before any
+  weights exist. Progress and cancel work by wrapping `scheduler.step`, because I2VGen-XL has no per-step callback.
+  T2V stays fully on the GPU (live preview frame decoded from the current latents into
+  `outputs/_live_preview.png`); I2V always uses CPU offload.
+- `app/python/blobtv_post.py`: the optional **Redux** post-processing, applied after denoising in this order:
+  upscale (plain bicubic x2, or Real-ESRGAN x2/x4 through `spandrel`, tiled) then RIFE interpolation
+  (`rife-ncnn-vulkan.exe` as a cancellable subprocess, model `rife-v4.6`, which can hit an arbitrary
+  frame count with `-n`). Everything is opt-in per generation; the tools are installed on demand into
+  `models/upscale/` and `models/rife/` (the RIFE zip is ~430 MB, only v4.6 is kept). Inspired by TRACE-V
+  in the PNAKOTUS-V2 repo (same Real-ESRGAN + RIFE tools), without its compression logic.
+- `app/python/blobtv_paths.py`: all path layout. Always resolve paths through it (portable app, no cwd assumptions).
+- `tauri/src/main.ts` + `index.html` + `style.css`: single-panel frontend, no framework.
 
-## Path & layout conventions
+## Conventions and gotchas
 
-All filesystem layout is centralized in `app/python/blobvision_paths.py` — **always resolve paths through
-it** rather than hardcoding relative paths, since the app must remain portable (works from any folder,
-no absolute paths baked in):
-
-- `BLOBVISION_ROOT` = repo root (derived from `__file__`, not cwd). `BLOBDREAM_ROOT` is a legacy alias
-  kept for older modules — same value.
-- `models/`, `outputs/`, `video-codecs/` all live under root; per-mode subdirs come from helpers like
-  `sdxl_model_dir()`, `vqgan_output_dir()`, `deepdream_output_dir()`, `style_output_dir()`.
-- `ensure_layout()` creates the expected directory tree and is called at import time by every engine
-  module (`blobvision_engine.py`, `blobvision_deepdream.py`, `blobvision_style.py`, `generate.py`).
-- `TAMING_REPO` resolves to `vendor/taming-transformers` (falls back to a legacy `taming-transformers/`
-  root folder if present) — this is the vendored, trimmed copy of the VQGAN model code, committed to git.
-- `gradio_allowed_paths()` whitelists the dirs Gradio is allowed to serve images/video from.
-- Legacy paths under `app/checkpoints/` and `app/outputs/` are auto-migrated into the new `models/` /
-  `outputs/` layout on first run — don't reintroduce writes to those old locations.
-
-## Engine architecture
-
-- **`blobvision_engine.py`** is the core VQGAN+CLIP engine (`BlobVisionEngine` class) plus all video
-  pipeline logic (frame extraction/probing via ffmpeg, RIFE interpolation, frame reassembly/muxing).
-  It owns `BlobVRAMCache`, which parks/unparks the SDXL sketch model and the VQGAN+CLIP stack so only
-  one occupies GPU memory at a time (`PHASE_SKETCH` vs `PHASE_VQGAN`) — VRAM budget is tight enough that
-  both models can't comfortably stay resident together.
-- **`app/generate.py`** is the original standalone VQGAN+CLIP CLI script (Katherine Crowson-style
-  optimization loop) that `blobvision_engine.py` wraps/drives; it imports `taming` from `TAMING_REPO`.
-- **`blobvision_deepdream.py`** and **`blobvision_style.py`** are self-contained sibling engines (own
-  dataclasses, own output dirs) — same shape as the VQGAN engine but far smaller, no VRAM-cache sharing.
-- **`blobvision_cancel.py`** is a simple thread-safe cooperative cancel flag (`request()`/`is_requested()`
-  → raises `AbortedError`) checked periodically inside long optimization loops; used for the UI's Abort
-  button.
-- **`blobvision_meta.py`** builds/reads a `blobdream` JSON blob embedded in output PNG metadata
-  (prompt, seed, iterations, mode, etc.) so generated images are self-describing and reproducible.
-- **`blobvision_log.py`** captures stdout/stderr into a bounded in-memory ring buffer for the UI's live
-  console panel, filtering out known-noisy framework warnings (`_SKIP_FRAGMENTS`).
-
-## UI architecture (`blobvision_ui.py`)
-
-Single large Gradio `Blocks` app (`build_ui()`) built around a family switcher (VQGAN / DeepDream /
-Style Transfer) rather than separate pages — swapping families updates visibility of shared/reused
-components (`switch_family`, `_family_btn_updates`) instead of remounting the UI. Key patterns to know
-before touching this file:
-
-- Per-family mode dictionaries (`MODE_BLURBS`, `DD_MODE_BLURBS`, `ITER_SLIDER_MAX`, `DEFAULT_ITERATIONS`,
-  `DEFAULT_DENOISE`) drive both UI copy and default slider values — when adding a mode, update these
-  alongside the actual generation branch, not just one or the other.
-- Model readiness is polled rather than pushed: `_sdxl_ready()`, `_vqgan_ready()`,
-  `_style_weights_ready()`, `_video_codecs_ready()` gate which install/action buttons are active, and
-  `poll_status()`/`poll_codecs_install_btn()`/`poll_style_install_btn()` re-check on a timer.
-- `get_engine()` / `get_dd_engine()` / `get_st_engine()` lazily construct and cache the per-family engine
-  singleton; `_dispose_engine()` / `_dispose_dd_engine()` / `_dispose_st_engine()` tear them down to free
-  VRAM when switching families or on exit.
-- `do_generate()` (VQGAN family) and `do_deepdream_generate()` / `do_style_generate()` are the three
-  generate-button entry points; they're long because they branch heavily on mode (`legacy`/`redux`/
-  `video`/`img2img`) — read the relevant mode branch only, don't assume shared logic across modes.
-- This file is very large (~3200 lines) and has known instability/proportion bugs per the maintainer —
-  when fixing UI bugs, prefer narrowly-scoped edits to the specific handler/component involved over
-  broad refactors, unless a refactor is explicitly the task.
-
-## Vendored code
-
-- `vendor/taming-transformers/` — trimmed VQGAN model code (taming-transformers), committed to git,
-  runtime package only (not the full upstream repo).
-- `app/CLIP/clip/` — vendored OpenAI CLIP.
-- Treat these as third-party code: prefer not to modify unless fixing an integration bug, and keep
-  changes minimal/upstream-compatible.
-
-## Removed scope
-
-ModelScope, AnimateDiff, and Disco Diffusion were deliberately removed from V1 to keep the repo lean and
-stable — don't reintroduce them without an explicit request.
+- Weights live in `models/modelscope-t2v` and `models/i2vgen-xl`, installed via the in-app button. A
+  `.blobtv_complete` marker file (written after a finished `snapshot_download`) is what counts as "installed".
+- The Rust shell forces `HF_HUB_OFFLINE=1`; only `enable_hub_downloads()` flips it back for downloads.
+- The port (8421) must match between `main.rs` and `main.ts`; BlobVision uses 8420, so both apps coexist.
+- Piped build commands mask exit codes: run builds as `cmd > log 2>&1; echo $?`.
+- `ensure_layout()` sweeps `work/` once per process only (a re-sweep mid-session deletes active job files).
+- Redux interpolation multiplies the fps by the same factor as the frame count, so the duration is preserved
+  (N frames -> N*f-(f-1)). The JSON sidecar records `base_fps`, `upscale`, `interp` and `output_size`.
+- Output files: `YYMMDD_T_NNN_prompt.mp4` (text to video) / `_I_` (image to video) plus a `.json` sidecar with the parameters.
