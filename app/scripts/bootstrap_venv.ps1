@@ -50,7 +50,7 @@ function Say($msg) {
 
 # Step markers are parsed by the app (tauri/src/main.ts, parseBootstrapStep) to
 # drive the progress bar in the output frame, so keep the "[n/N]" format.
-$TotalSteps = 5
+$TotalSteps = 2
 function Step($n, $msg) {
     Say "[$n/$TotalSteps] $msg"
 }
@@ -75,9 +75,19 @@ function Invoke-WithHeartbeat($exe, [string[]]$argList, $label, $WatchDir) {
     return $p.ExitCode
 }
 
-if ((Test-Path (Join-Path $TargetDir "python.exe")) -or (Test-Path (Join-Path $TargetDir "Scripts\python.exe"))) {
+# The flat layout is only trusted once the marker at the very end of this script
+# exists: python.exe is extracted within seconds, so on its own it would make an
+# install interrupted halfway (window closed, crash, power cut) look complete
+# and leave every later launch with a broken environment.
+$markerPath = Join-Path $TargetDir ".bootstrap_complete"
+if ((Test-Path (Join-Path $TargetDir "Scripts\python.exe")) -or
+    ((Test-Path (Join-Path $TargetDir "python.exe")) -and (Test-Path $markerPath))) {
     Say "Python environment already present at $TargetDir -- nothing to do."
     exit 0
+}
+if (Test-Path $TargetDir) {
+    Say "Removing an incomplete Python environment from an interrupted install..."
+    Remove-Item -Recurse -Force $TargetDir
 }
 
 $scriptRoot = $PSScriptRoot
@@ -99,70 +109,73 @@ try {
     $uvCache = Join-Path (Split-Path -Parent $TargetDir) ".uv-cache"
     $env:UV_CACHE_DIR = $uvCache
 
-    Step 1 "Downloading Python $PythonVersion (embeddable, ~10 MB) from python.org..."
-    Invoke-WebRequest -Uri $embedZipUrl -OutFile $embedZipPath -UseBasicParsing -TimeoutSec 120
+    # Python and uv are independent downloads: fetch both at once.
+    Step 1 "Downloading Python $PythonVersion (~10 MB) and uv $UvVersion (~20 MB) in parallel..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $uvZipUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-x86_64-pc-windows-msvc.zip"
+    $uvZipPath = Join-Path $tempDir "uv.zip"
+    $wc1 = New-Object System.Net.WebClient
+    $wc2 = New-Object System.Net.WebClient
+    $dl1 = $wc1.DownloadFileTaskAsync($embedZipUrl, $embedZipPath)
+    $dl2 = $wc2.DownloadFileTaskAsync($uvZipUrl, $uvZipPath)
+    [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($dl1, $dl2))
 
-    Say "Extracting to $TargetDir ..."
+    Say "Extracting Python to $TargetDir ..."
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
     Expand-Archive -Path $embedZipPath -DestinationPath $TargetDir -Force
 
     # The embeddable package ships with site-packages import disabled by
-    # default (python*._pth has "import site" commented out) -- pip and any
-    # installed package would otherwise be invisible to the interpreter.
+    # default (python*._pth has "import site" commented out) -- installed
+    # packages would otherwise be invisible to the interpreter.
     $pthFile = Get-ChildItem -Path $TargetDir -Filter "python*._pth" | Select-Object -First 1
     if (-not $pthFile) {
         throw "Could not find the embeddable package's ._pth file under $TargetDir"
     }
-    Say "Enabling site-packages in $($pthFile.Name)..."
     (Get-Content $pthFile.FullName) -replace '^#\s*import site', 'import site' | Set-Content $pthFile.FullName
 
     $pythonExe = Join-Path $TargetDir "python.exe"
 
-    Step 2 "Installing pip (downloading get-pip.py)..."
-    $getPipPath = Join-Path $tempDir "get-pip.py"
-    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPipPath -UseBasicParsing -TimeoutSec 60
-
-    & $pythonExe $getPipPath --no-warn-script-location
-    if ($LASTEXITCODE -ne 0) { throw "get-pip.py failed (exit $LASTEXITCODE)" }
-
-    # uv (astral-sh/uv, a standalone Rust binary -- no Python/pip needed to
-    # run it) does the two big installs below instead of plain pip: it
-    # downloads packages in parallel rather than one at a time, which is
-    # the one lever that actually helps every first-time user regardless of
-    # their disk speed (pip itself stays installed above as a harmless
-    # fallback, in case anything downstream expects it importable, but
-    # nothing here actually calls it again after this point).
-    Step 3 "Downloading uv $UvVersion (parallel installer, ~20 MB)..."
-    $uvZipUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-x86_64-pc-windows-msvc.zip"
-    $uvZipPath = Join-Path $tempDir "uv.zip"
-    Invoke-WebRequest -Uri $uvZipUrl -OutFile $uvZipPath -UseBasicParsing -TimeoutSec 120
+    # uv (astral-sh/uv, a standalone Rust binary -- no Python/pip needed to run
+    # it) installs everything, so pip itself is not installed at all: nothing
+    # in the app uses it, and skipping get-pip saves a download and ~15 s.
     $uvDir = Join-Path $tempDir "uv"
     Expand-Archive -Path $uvZipPath -DestinationPath $uvDir -Force
     $uvExe = Get-ChildItem -Path $uvDir -Filter "uv.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
     if (-not $uvExe) { throw "uv.exe not found after extracting $uvZipPath" }
 
-    # torch/torchvision aren't in requirements-frozen.txt on purpose -- they
-    # need PyTorch's own CUDA-specific index, not plain PyPI, and the right
-    # build depends on what this app already assumes about the target
-    # machine (an NVIDIA GPU -- see resolve_sketch_full_gpu in
-    # blobtv_engine.py, which has no real CPU-only path anyway).
-    # torchaudio is deliberately NOT installed: nothing in the app imports
-    # it (verified against the actual shipped code, not assumed) -- it was
-    # only ever installed because it's what PyTorch's own docs tell you to
-    # install alongside torch/torchvision, and it's a genuinely large
-    # download (~1.7 GB) for zero runtime benefit here.
-    Step 4 "Installing PyTorch $TorchVersion ($CudaTag build) -- this is the big one, ~3 GB download, several minutes..."
+    # The PyTorch wheel is one ~2.7 GB file on a single connection, which on
+    # its own rarely saturates a fast line. Installing torch and every other
+    # package in ONE uv run lets uv download the rest of the packages while the
+    # big wheel is still coming in. torch/torchvision aren't in
+    # requirements-frozen.txt on purpose: they need PyTorch's own CUDA build.
+    # --find-links (not --extra-index-url) points uv at just the wheel list of
+    # those two packages, so no other package can be picked up from the PyTorch
+    # index by mistake. The "+cu128" local versions exist nowhere else.
+    # torchaudio is deliberately NOT installed: nothing in the app imports it
+    # and it is a ~1.7 GB download.
+    $env:UV_HTTP_TIMEOUT = "600"   # slow lines: do not give up on the multi-GB wheel
+    Step 2 "Installing PyTorch $TorchVersion ($CudaTag, ~3 GB) and all other packages in one go, several minutes..."
     $code = Invoke-WithHeartbeat $uvExe @(
         "pip", "install", "--python", $pythonExe,
         "torch==$TorchVersion+$CudaTag", "torchvision==$TorchvisionVersion+$CudaTag",
-        "--index-url", "https://download.pytorch.org/whl/$CudaTag"
-    ) "PyTorch install" $uvCache
-    if ($code -ne 0) { throw "PyTorch install failed (exit $code)" }
+        "-r", $requirementsPath,
+        "--find-links", "https://download.pytorch.org/whl/$CudaTag/torch/",
+        "--find-links", "https://download.pytorch.org/whl/$CudaTag/torchvision/"
+    ) "Package install" $uvCache
+    if ($code -ne 0) {
+        # Safety net: the older, slower but proven two-step route.
+        Say "Combined install failed (exit $code), falling back to two separate installs..."
+        $code = Invoke-WithHeartbeat $uvExe @(
+            "pip", "install", "--python", $pythonExe,
+            "torch==$TorchVersion+$CudaTag", "torchvision==$TorchvisionVersion+$CudaTag",
+            "--index-url", "https://download.pytorch.org/whl/$CudaTag"
+        ) "PyTorch install" $uvCache
+        if ($code -ne 0) { throw "PyTorch install failed (exit $code)" }
+        $code = Invoke-WithHeartbeat $uvExe @("pip", "install", "--python", $pythonExe, "-r", $requirementsPath) "Requirements install" $null
+        if ($code -ne 0) { throw "requirements-frozen.txt install failed (exit $code)" }
+    }
 
-    Step 5 "Installing the rest of the frozen requirements (diffusers, transformers, FastAPI...)..."
-    $code = Invoke-WithHeartbeat $uvExe @("pip", "install", "--python", $pythonExe, "-r", $requirementsPath) "Requirements install" $null
-    if ($code -ne 0) { throw "requirements-frozen.txt install failed (exit $code)" }
-
+    New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Say "Bootstrap complete: $TargetDir is a working Python environment."
 }
 finally {

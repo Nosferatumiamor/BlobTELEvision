@@ -4,16 +4,24 @@
 // Must match API_PORT in src-tauri/src/main.rs. Deliberately not 8420 (BlobVision's
 // port) so both apps can run side by side.
 const API_BASE = "http://127.0.0.1:8421";
-const HEALTH_POLL_MS = 1000;
+const HEALTH_POLL_MS = 300; // short: the engine usually answers within a couple of seconds
 // A fresh install bootstraps a whole Python + PyTorch environment before the API
 // exists at all (several minutes), so the initial wait has to be generous.
 const ENGINE_STARTUP_TIMEOUT_MS = 40 * 60 * 1000;
 const ENGINE_STARTUP_SLOW_HINT_MS = 60000;
 
 // ---------------------------------------------------------------- splash
-// Purely cosmetic and on a fixed timer, independent of the real load progress.
-const SPLASH_SCREEN_MS = 12000;
+// Shown for at least SPLASH_MIN_MS so the artwork is seen, then dismissed as soon as the
+// engine answers; SPLASH_MAX_MS is the cap when it is slow (the app is usable behind it).
+const SPLASH_MIN_MS = 6000;
+const SPLASH_MAX_MS = 12000;
 const SPLASH_DOTS_INTERVAL_MS = 450;
+let splashMinElapsed = false;
+let splashEngineReady = false;
+let hideSplash: () => void = () => {};
+function maybeHideSplash() {
+  if (splashMinElapsed && splashEngineReady) hideSplash();
+}
 function initSplashScreen() {
   const splash = document.getElementById("splash-screen");
   const dots = document.getElementById("splash-dots");
@@ -23,11 +31,19 @@ function initSplashScreen() {
     if (dots) dots.textContent = ".".repeat(dotCount);
     dotCount = (dotCount + 1) % 4;
   }, SPLASH_DOTS_INTERVAL_MS);
-  setTimeout(() => {
+  let hidden = false;
+  hideSplash = () => {
+    if (hidden) return;
+    hidden = true;
     clearInterval(dotsTimer);
     splash.classList.add("hide");
     setTimeout(() => splash.remove(), 700);
-  }, SPLASH_SCREEN_MS);
+  };
+  setTimeout(() => {
+    splashMinElapsed = true;
+    maybeHideSplash();
+  }, SPLASH_MIN_MS);
+  setTimeout(hideSplash, SPLASH_MAX_MS);
 }
 // A type="module" script can run after DOMContentLoaded already fired.
 if (document.readyState === "loading") {
@@ -574,8 +590,8 @@ let bootstrapLogSeen = false;
 let bootstrapStep: { n: number; total: number; label: string; since: number } | null = null;
 // Rough share of the whole setup each step takes (PyTorch dominates). The bar
 // creeps toward the next step's start so it never looks frozen during the long ones.
-const STEP_START = [0, 0, 10, 14, 18, 82];
-const STEP_TAU_S = [0, 20, 15, 10, 150, 60];
+const STEP_START = [0, 0, 6];
+const STEP_TAU_S = [0, 10, 240];
 
 function renderStartup(startedAt: number) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -618,6 +634,8 @@ async function waitForEngine() {
       bootstrapPanelEl.hidden = true;
       outputEmptyEl.hidden = false;
       tvSet("startup", undefined);
+      splashEngineReady = true;
+      maybeHideSplash();
       engineUp = true;
       setEngineStatus("Engine reachable", "status-ok");
       formats = await fetchJson("/formats");

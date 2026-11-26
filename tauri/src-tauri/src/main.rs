@@ -21,6 +21,94 @@ use std::thread;
 // would normally get one. See spawn_python_engine()'s release-mode branch.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+// One Windows job object owns every process this app starts: the venv bootstrap,
+// the Python engine, and everything those spawn in turn (ffmpeg, RIFE, the
+// virtualenv launcher stub's real interpreter...). Killing just the direct child
+// would leave such grandchildren running, and nothing at all would be cleaned up
+// if this app crashed or was ended from the Task Manager. With the job's
+// KILL_ON_JOB_CLOSE flag set, Windows itself kills the whole tree the moment this
+// process is gone, however it went. The flag is switched off while "Fast reboot"
+// wants the engine to outlive the window (see set_fast_boot / the exit handler).
+// Raw kernel32 calls instead of a crate: four functions, no new dependency.
+mod job {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+    use std::sync::OnceLock;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(
+            job: *mut c_void,
+            info_class: i32,
+            info: *mut c_void,
+            info_len: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn TerminateJobObject(job: *mut c_void, exit_code: u32) -> i32;
+    }
+
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    // sizeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION); LimitFlags sits at offset 16
+    // (after two 8-byte time limits) on 64-bit and 16 on 32-bit as well.
+    #[cfg(target_pointer_width = "64")]
+    const EXT_INFO_SIZE: usize = 144;
+    #[cfg(target_pointer_width = "32")]
+    const EXT_INFO_SIZE: usize = 112;
+    const LIMIT_FLAGS_OFFSET: usize = 16;
+
+    static JOB: OnceLock<usize> = OnceLock::new();
+
+    fn handle() -> *mut c_void {
+        // 0 means creation failed: every function below then quietly does nothing
+        // and the app falls back to the plain child.kill() behaviour.
+        *JOB.get_or_init(|| unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) } as usize)
+            as *mut c_void
+    }
+
+    pub fn set_kill_on_close(on: bool) {
+        let h = handle();
+        if h.is_null() {
+            return;
+        }
+        let mut buf = [0u8; EXT_INFO_SIZE];
+        let flags: u32 = if on { JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE } else { 0 };
+        buf[LIMIT_FLAGS_OFFSET..LIMIT_FLAGS_OFFSET + 4].copy_from_slice(&flags.to_le_bytes());
+        unsafe {
+            SetInformationJobObject(
+                h,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                buf.as_mut_ptr() as *mut c_void,
+                EXT_INFO_SIZE as u32,
+            );
+        }
+    }
+
+    pub fn assign(child: &Child) {
+        let h = handle();
+        if !h.is_null() {
+            unsafe {
+                AssignProcessToJobObject(h, child.as_raw_handle() as *mut c_void);
+            }
+        }
+    }
+
+    pub fn terminate() {
+        let h = handle();
+        if !h.is_null() {
+            unsafe {
+                TerminateJobObject(h, 1);
+            }
+        }
+    }
+}
+
+// True while the venv bootstrap runs: closing the app must stop it whatever the
+// Fast reboot setting says (that setting is about the finished engine only).
+static BOOTSTRAPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 use tauri::Manager;
 
 // Must match API_BASE in tauri/src/main.ts. Deliberately not 8420 (BlobVision's
@@ -73,7 +161,33 @@ fn get_fast_boot() -> bool {
 
 #[tauri::command]
 fn set_fast_boot(enabled: bool) -> Result<(), String> {
-    write_settings(&repo_root(), &Settings { fast_boot: enabled }).map_err(|e| e.to_string())
+    write_settings(&repo_root(), &Settings { fast_boot: enabled }).map_err(|e| e.to_string())?;
+    // Fast reboot ON: the engine may outlive this process. OFF: Windows kills it
+    // with us, even if we crash. (Not while bootstrapping, which is always killed.)
+    if !BOOTSTRAPPING.load(std::sync::atomic::Ordering::SeqCst) {
+        job::set_kill_on_close(!enabled);
+    }
+    Ok(())
+}
+
+// Asks an engine we did not start ourselves (one kept alive by a previous Fast
+// reboot session and reused by this launch) to exit. Best effort.
+fn shutdown_reused_engine() {
+    let url = format!("http://127.0.0.1:{}/shutdown", API_PORT);
+    let _ = ureq::post(&url)
+        .timeout(std::time::Duration::from_millis(1500))
+        .call();
+}
+
+// A flat-layout venv (built by bootstrap_venv.ps1) only counts once the script
+// wrote its completion marker: python.exe is unpacked in the first seconds, so
+// without this an install interrupted halfway would look finished forever.
+// A virtualenv-style venv (venv/Scripts/python.exe, the dev machine's own) has
+// no marker and is trusted as is.
+fn venv_ready(root: &Path) -> bool {
+    root.join("venv").join("Scripts").join("python.exe").is_file()
+        || (root.join("venv").join("python.exe").is_file()
+            && root.join("venv").join(".bootstrap_complete").is_file())
 }
 
 // A short-timeout probe, not a real health check of "is this genuinely our
@@ -176,7 +290,7 @@ fn find_python_exe(root: &Path, name: &str) -> Option<PathBuf> {
 // so this is safe to call unconditionally on every launch rather than
 // needing its own separate "have we already done this" flag.
 fn bootstrap_venv_if_missing(root: &Path) -> std::io::Result<()> {
-    if find_python_exe(root, "python.exe").is_some() {
+    if venv_ready(root) {
         // No bootstrap needed this launch — but logs/bootstrap.log from a
         // PAST bootstrap can still be sitting on disk from last time, and
         // read_bootstrap_log has no way to tell "stale leftover" apart
@@ -211,7 +325,11 @@ fn bootstrap_venv_if_missing(root: &Path) -> std::io::Result<()> {
                 .stderr(Stdio::from(err_file));
         }
     }
-    let status = cmd.status()?;
+    // spawn + assign to the job + wait, instead of cmd.status(): if the app is
+    // closed mid-install, Windows stops powershell and uv with it.
+    let mut child = cmd.spawn()?;
+    job::assign(&child);
+    let status = child.wait()?;
     if !status.success() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -232,7 +350,13 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
     if try_reuse_existing_engine() {
         return Ok(None);
     }
-    bootstrap_venv_if_missing(&root)?;
+    BOOTSTRAPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    job::set_kill_on_close(true);
+    let bootstrap_result = bootstrap_venv_if_missing(&root);
+    BOOTSTRAPPING.store(false, std::sync::atomic::Ordering::SeqCst);
+    bootstrap_result?;
+    // From here on the engine follows the Fast reboot setting.
+    job::set_kill_on_close(!fast_boot_enabled(&root));
     // Release builds launch pythonw.exe, not python.exe — see the
     // release-mode branch below for why (a virtualenv-created venv's own
     // python.exe is a launcher stub that relaunches the real interpreter as
@@ -260,7 +384,6 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
     cmd.arg(api_script)
         .arg("--port")
         .arg(API_PORT)
-        .arg("--no-warmup")
         .current_dir(&root)
         .env("HF_HUB_OFFLINE", "1")
         .env("TRANSFORMERS_OFFLINE", "1");
@@ -330,7 +453,9 @@ fn spawn_python_engine() -> std::io::Result<Option<Child>> {
         // fix, better than failing to launch at all over a logging nicety.
     }
 
-    cmd.spawn().map(Some)
+    let child = cmd.spawn()?;
+    job::assign(&child);
+    Ok(Some(child))
 }
 
 // Opens the output folder in
@@ -500,9 +625,17 @@ fn main() {
                     // process is worse than a few leftover KB.
                     return;
                 }
-                if let Some(mut child) = child_opt {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                // Whole tree, grandchildren included (the job object), then the
+                // direct child as a fallback if the job could not be created.
+                job::terminate();
+                match child_opt {
+                    Some(mut child) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    // No child of ours: the engine is one reused from an earlier
+                    // Fast reboot session. Fast reboot is off now, so stop it too.
+                    None => shutdown_reused_engine(),
                 }
                 // child.kill() is a hard TerminateProcess on Windows, so
                 // Python never gets a chance to run its own atexit cleanup

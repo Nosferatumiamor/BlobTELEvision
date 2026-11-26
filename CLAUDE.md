@@ -36,6 +36,18 @@ Type-check the frontend with `npx tsc --noEmit` from `tauri/`.
   `app/requirements-frozen.txt`), implements "Fast reboot" (leave the engine alive after the window closes;
   the API exits by itself after 30 idle minutes) and reuses an already-running engine on port 8421.
   `app/` is bundled as a Tauri resource, so **Python changes need a rebuild to reach the shipped exe**.
+  `repo_root()` takes the OUTERMOST folder containing `app/python/blobtv_api.py` (the nearest one would be
+  `target/debug|release`, which holds a copy of the bundled `app/`, and the venv/models would land there).
+  Every child process (bootstrap, engine and its own children) is put in one Windows job object
+  (`mod job`); with Fast reboot off it has KILL_ON_JOB_CLOSE, so closing or crashing the app kills the whole
+  tree. An engine reused from an earlier Fast reboot session is stopped with `POST /shutdown`.
+  A flat-layout venv only counts as installed once `venv/.bootstrap_complete` exists (written last by
+  `bootstrap_venv.ps1`), so an interrupted install is wiped and redone instead of trusted.
+- Startup speed: the engine preloads text-to-video by itself right after starting (`--no-warmup` disables it)
+  and reads the fp16 weight files in threads while Python imports torch/diffusers (~16 s of CPU-bound
+  imports; threads do not speed those up). The bootstrap installs PyTorch and all other packages in one
+  `uv pip install` (PyTorch wheels through `--find-links`) so the small packages download while the
+  ~2.7 GB torch wheel is still coming in, and it does not install pip.
 - `app/python/blobtv_api.py`: FastAPI. Jobs are polled (`POST /generate` -> `GET /jobs/{id}`), model install
   is fire-and-forget (`POST /models/install`, poll `/models/status`), `/cancel` sets a cooperative flag.
 - `app/python/blobtv_engine.py`: model registry (`MODELS`), weights status/download, the engine. Importing it

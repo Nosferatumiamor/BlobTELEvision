@@ -294,6 +294,15 @@ def warmup(kind: str = Body("t2v", embed=True)):
     return {"ok": True}
 
 
+@app.post("/shutdown")
+def shutdown():
+    """Lets the desktop shell stop an engine it did not start itself (one kept
+    alive by a previous 'Fast reboot' session) when the user closes the app with
+    Fast reboot turned off. Exits shortly after answering."""
+    threading.Timer(0.3, lambda: os._exit(0)).start()
+    return {"ok": True}
+
+
 @app.post("/priority/normal")
 def priority_normal():
     # Kept for frontend compatibility with the BlobVision shell; nothing to do.
@@ -463,9 +472,42 @@ def parse_args():
     p = argparse.ArgumentParser(description="BlobTELEvision API server")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=API_PORT_DEFAULT)
-    # Accepted (and ignored) so the same launch args as BlobVision keep working.
-    p.add_argument("--no-warmup", action="store_true")
+    p.add_argument("--no-warmup", action="store_true", help="do not preload text-to-video at startup")
     return p.parse_args()
+
+
+def _prefetch_model_files(model_dir):
+    """Reads the fp16 weight files once so they sit in the OS file cache. Meant to
+    run in threads next to the Python imports: file reads release the GIL, so on a
+    cold start (after a reboot) the disk and the CPU work at the same time instead
+    of one after the other. A no-op in effect when the files are already cached."""
+    try:
+        for root, _dirs, files in os.walk(model_dir):
+            for name in files:
+                if name.endswith(".fp16.safetensors"):
+                    with open(os.path.join(root, name), "rb") as fh:
+                        while fh.read(16 * 1024 * 1024):
+                            pass
+    except Exception:
+        pass
+
+
+def _preload_default_model():
+    """Loads text-to-video as soon as the engine is up, instead of waiting for the
+    window to ask: the multi-second torch/diffusers import and the model load then
+    overlap with the window opening, and the first generation is instant."""
+    time.sleep(1.0)  # let uvicorn start answering /health first
+    try:
+        if not model_status("t2v")["ready"]:
+            return
+        # One reader thread per weight file, running while this thread imports torch.
+        for sub in ("unet", "text_encoder", "vae"):
+            threading.Thread(
+                target=_prefetch_model_files, args=(os.path.join(MODELS["t2v"]["dir"], sub),), daemon=True
+            ).start()
+        _engine.ensure_loaded("t2v", on_progress=lambda m: print(m, flush=True))
+    except Exception as exc:
+        print("Preload failed: {}: {}".format(type(exc).__name__, exc), flush=True)
 
 
 def main():
@@ -476,6 +518,8 @@ def main():
     cli = parse_args()
     atexit.register(_sweep_uploads_on_exit)
     threading.Thread(target=_idle_shutdown_watchdog, daemon=True).start()
+    if not cli.no_warmup:
+        threading.Thread(target=_preload_default_model, daemon=True).start()
     print("BlobTELEvision API ready: http://{}:{}/docs".format(cli.host, cli.port), flush=True)
     uvicorn.run(app, host=cli.host, port=cli.port, log_level="info")
 
