@@ -34,7 +34,8 @@
     </header>
 
     <main id="layout">
-      <aside id="sidebar">
+      <!-- LEFT: what to make -->
+      <aside id="col-left" class="side-col">
         <div class="field">
           <span class="field-label">Mode</span>
           <div class="radio-row" id="mode-radio">
@@ -58,7 +59,7 @@
 
         <label class="field">
           <span class="field-label">Prompt</span>
-          <textarea id="prompt" rows="3" placeholder="Describe the slop (e.g. a man eating spaghetti)"></textarea>
+          <textarea id="prompt" rows="4" placeholder="Describe the slop (e.g. a man eating spaghetti)"></textarea>
         </label>
 
         <label class="field">
@@ -66,6 +67,88 @@
           <input id="negative-prompt" type="text" placeholder="Separate slop with commas" />
         </label>
 
+        <div class="field">
+          <span class="field-label">Seed</span>
+          <div class="seed-row">
+            <input id="seed" type="number" placeholder="random" />
+            <button id="seed-random" type="button" class="menu-btn" title="Random seed">🎲</button>
+            <button id="seed-last" type="button" class="menu-btn" title="Reuse the last seed">↺</button>
+          </div>
+        </div>
+
+        <button id="open-outputs-btn" type="button" class="menu-btn">Open outputs folder</button>
+      </aside>
+
+      <!-- CENTER: the television -->
+      <section id="stage">
+        <div id="models-panel" class="panel" hidden>
+          <p class="panel-title">Model weights not installed</p>
+          <p class="field-hint">
+            BlobTELEvision never downloads anything on its own. Tick what you want, then download.
+            Image → video is optional.
+          </p>
+          <label class="checkbox-field models-row">
+            <input id="cb-t2v" type="checkbox" checked />
+            <span>ModelScope text-to-video, 1.7B (~3.7 GB)</span>
+            <span id="progress-t2v" class="models-row-progress"></span>
+          </label>
+          <label class="checkbox-field models-row">
+            <input id="cb-i2v" type="checkbox" />
+            <span>I2VGen-XL image-to-video (~5 GB)</span>
+            <span id="progress-i2v" class="models-row-progress"></span>
+          </label>
+          <button id="models-install-btn" type="button">Download selected</button>
+          <p id="models-install-status" class="field-hint" hidden></p>
+        </div>
+
+        <div id="tv">
+          <div id="tv-bezel">
+            <div id="output-box">
+              <div id="output-empty">
+                <p class="empty-title">Nothing on the air</p>
+                <p class="field-hint" id="empty-hint">Write a prompt and hit DEGENERATE.</p>
+              </div>
+
+              <!-- Shown inside the screen while the Python environment is being built. -->
+              <div id="bootstrap-panel" hidden>
+                <p class="empty-title"><span class="dot"></span><span id="bootstrap-title">Setting up the Python environment</span></p>
+                <p class="field-hint" id="bootstrap-step">Starting...</p>
+                <div id="bootstrap-bar"><div id="bootstrap-fill"></div></div>
+                <p class="field-hint" id="bootstrap-elapsed"></p>
+                <pre id="bootstrap-console"></pre>
+              </div>
+
+              <img id="live-preview" alt="" hidden />
+              <video id="output-video" controls loop hidden></video>
+              <div class="scanlines"></div>
+            </div>
+          </div>
+
+          <div id="tv-chin">
+            <div id="tv-led" title="On air while generating"></div>
+            <div id="tv-grille" aria-hidden="true"></div>
+            <div id="tv-knobs" aria-hidden="true">
+              <button type="button" class="tv-knob" tabindex="-1"></button>
+              <button type="button" class="tv-knob tv-knob-big" tabindex="-1"></button>
+            </div>
+          </div>
+        </div>
+
+        <div id="progress-wrap" hidden>
+          <div id="progress-bar"><div id="progress-fill"></div></div>
+          <span id="progress-text"></span>
+        </div>
+
+        <pre id="job-log" hidden></pre>
+
+        <div id="gallery-head">
+          <span class="field-label">Recent videos</span>
+        </div>
+        <div id="gallery"></div>
+      </section>
+
+      <!-- RIGHT: how to make it -->
+      <aside id="col-right" class="side-col">
         <label class="field">
           <span class="field-label">Format</span>
           <select id="format"></select>
@@ -99,15 +182,6 @@
           <input id="guidance" type="range" min="1" max="20" step="0.5" value="9" />
         </label>
 
-        <div class="field">
-          <span class="field-label">Seed</span>
-          <div class="seed-row">
-            <input id="seed" type="number" placeholder="random" />
-            <button id="seed-random" type="button" class="menu-btn" title="Random seed">🎲</button>
-            <button id="seed-last" type="button" class="menu-btn" title="Reuse the last seed">↺</button>
-          </div>
-        </div>
-
         <div class="field" id="redux-field">
           <span class="field-label">Redux (optional)</span>
           <label class="field">
@@ -132,60 +206,7 @@
           </p>
           <button id="redux-install-btn" type="button" class="menu-btn" hidden>Install redux tools</button>
         </div>
-
-        <button id="open-outputs-btn" type="button" class="menu-btn">Open outputs folder</button>
       </aside>
-
-      <section id="stage">
-        <div id="bootstrap-panel" class="panel" hidden>
-          <p class="panel-title"><span class="dot"></span>Setting up Python environment…</p>
-          <p class="field-hint">
-            First launch only: this downloads Python and PyTorch (several GB). Every later launch skips it.
-          </p>
-          <pre id="bootstrap-console"></pre>
-        </div>
-
-        <div id="models-panel" class="panel" hidden>
-          <p class="panel-title">Model weights not installed</p>
-          <p class="field-hint">
-            BlobTELEvision never downloads anything on its own. Tick what you want, then download.
-            Image → video is optional.
-          </p>
-          <label class="checkbox-field models-row">
-            <input id="cb-t2v" type="checkbox" checked />
-            <span>ModelScope text-to-video, 1.7B (~3.7 GB)</span>
-            <span id="progress-t2v" class="models-row-progress"></span>
-          </label>
-          <label class="checkbox-field models-row">
-            <input id="cb-i2v" type="checkbox" />
-            <span>I2VGen-XL image-to-video (~5 GB)</span>
-            <span id="progress-i2v" class="models-row-progress"></span>
-          </label>
-          <button id="models-install-btn" type="button">Download selected</button>
-          <p id="models-install-status" class="field-hint" hidden></p>
-        </div>
-
-        <div id="output-box">
-          <div id="output-empty">
-            <p class="empty-title">Nothing on the air</p>
-            <p class="field-hint" id="empty-hint">Write a prompt and hit DEGENERATE.</p>
-          </div>
-          <img id="live-preview" alt="" hidden />
-          <video id="output-video" controls loop hidden></video>
-        </div>
-
-        <div id="progress-wrap" hidden>
-          <div id="progress-bar"><div id="progress-fill"></div></div>
-          <span id="progress-text"></span>
-        </div>
-
-        <pre id="job-log" hidden></pre>
-
-        <div id="gallery-head">
-          <span class="field-label">Recent videos</span>
-        </div>
-        <div id="gallery"></div>
-      </section>
     </main>
 
     <script type="module" src="/src/main.ts"></script>

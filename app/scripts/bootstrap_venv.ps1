@@ -48,6 +48,33 @@ function Say($msg) {
     [Console]::Out.Flush()
 }
 
+# Step markers are parsed by the app (tauri/src/main.ts, parseBootstrapStep) to
+# drive the progress bar in the output frame, so keep the "[n/N]" format.
+$TotalSteps = 5
+function Step($n, $msg) {
+    Say "[$n/$TotalSteps] $msg"
+}
+
+# Runs a native command and prints a heartbeat line every few seconds while it
+# works. uv hides its own progress bars when stdout is redirected to a file, so
+# without this the multi-GB steps look frozen for many minutes. $WatchDir (uv's
+# cache) is measured to show real download progress.
+function Invoke-WithHeartbeat($exe, [string[]]$argList, $label, $WatchDir) {
+    $quoted = $argList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
+    $p = Start-Process -FilePath $exe -ArgumentList ($quoted -join ' ') -NoNewWindow -PassThru
+    $null = $p.Handle  # keeps the handle so ExitCode is readable after exit
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $p.WaitForExit(10000)) {
+        $info = ""
+        if ($WatchDir -and (Test-Path $WatchDir)) {
+            $bytes = (Get-ChildItem $WatchDir -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            if ($bytes) { $info = (" - {0:n2} GB downloaded so far" -f ($bytes / 1GB)) }
+        }
+        Say ("    ... {0} still running ({1:mm\:ss} elapsed){2}" -f $label, $sw.Elapsed, $info)
+    }
+    return $p.ExitCode
+}
+
 if ((Test-Path (Join-Path $TargetDir "python.exe")) -or (Test-Path (Join-Path $TargetDir "Scripts\python.exe"))) {
     Say "Python environment already present at $TargetDir -- nothing to do."
     exit 0
@@ -65,7 +92,14 @@ New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 try {
     $embedZipUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
     $embedZipPath = Join-Path $tempDir "python-embed.zip"
-    Say "Downloading Python $PythonVersion (embeddable, ~10 MB) from python.org..."
+    # uv's package cache lives next to the venv (same volume) instead of the
+    # global %LOCALAPPDATA%\uv\cache: that avoids the "failed to hardlink,
+    # falling back to full copy" warning, avoids storing every package twice,
+    # and is deleted at the end so it leaves nothing behind.
+    $uvCache = Join-Path (Split-Path -Parent $TargetDir) ".uv-cache"
+    $env:UV_CACHE_DIR = $uvCache
+
+    Step 1 "Downloading Python $PythonVersion (embeddable, ~10 MB) from python.org..."
     Invoke-WebRequest -Uri $embedZipUrl -OutFile $embedZipPath -UseBasicParsing -TimeoutSec 120
 
     Say "Extracting to $TargetDir ..."
@@ -84,11 +118,10 @@ try {
 
     $pythonExe = Join-Path $TargetDir "python.exe"
 
-    Say "Downloading get-pip.py..."
+    Step 2 "Installing pip (downloading get-pip.py)..."
     $getPipPath = Join-Path $tempDir "get-pip.py"
     Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPipPath -UseBasicParsing -TimeoutSec 60
 
-    Say "Installing pip..."
     & $pythonExe $getPipPath --no-warn-script-location
     if ($LASTEXITCODE -ne 0) { throw "get-pip.py failed (exit $LASTEXITCODE)" }
 
@@ -99,7 +132,7 @@ try {
     # their disk speed (pip itself stays installed above as a harmless
     # fallback, in case anything downstream expects it importable, but
     # nothing here actually calls it again after this point).
-    Say "Downloading uv $UvVersion (parallel installer, ~20 MB)..."
+    Step 3 "Downloading uv $UvVersion (parallel installer, ~20 MB)..."
     $uvZipUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-x86_64-pc-windows-msvc.zip"
     $uvZipPath = Join-Path $tempDir "uv.zip"
     Invoke-WebRequest -Uri $uvZipUrl -OutFile $uvZipPath -UseBasicParsing -TimeoutSec 120
@@ -118,18 +151,21 @@ try {
     # only ever installed because it's what PyTorch's own docs tell you to
     # install alongside torch/torchvision, and it's a genuinely large
     # download (~1.7 GB) for zero runtime benefit here.
-    Say "Installing PyTorch $TorchVersion ($CudaTag build) -- this is the big one, several GB..."
-    & $uvExe pip install --python $pythonExe `
-        "torch==$TorchVersion+$CudaTag" "torchvision==$TorchvisionVersion+$CudaTag" `
-        --index-url "https://download.pytorch.org/whl/$CudaTag"
-    if ($LASTEXITCODE -ne 0) { throw "PyTorch install failed (exit $LASTEXITCODE)" }
+    Step 4 "Installing PyTorch $TorchVersion ($CudaTag build) -- this is the big one, ~3 GB download, several minutes..."
+    $code = Invoke-WithHeartbeat $uvExe @(
+        "pip", "install", "--python", $pythonExe,
+        "torch==$TorchVersion+$CudaTag", "torchvision==$TorchvisionVersion+$CudaTag",
+        "--index-url", "https://download.pytorch.org/whl/$CudaTag"
+    ) "PyTorch install" $uvCache
+    if ($code -ne 0) { throw "PyTorch install failed (exit $code)" }
 
-    Say "Installing the rest of the frozen requirements..."
-    & $uvExe pip install --python $pythonExe -r $requirementsPath
-    if ($LASTEXITCODE -ne 0) { throw "requirements-frozen.txt install failed (exit $LASTEXITCODE)" }
+    Step 5 "Installing the rest of the frozen requirements (diffusers, transformers, FastAPI...)..."
+    $code = Invoke-WithHeartbeat $uvExe @("pip", "install", "--python", $pythonExe, "-r", $requirementsPath) "Requirements install" $null
+    if ($code -ne 0) { throw "requirements-frozen.txt install failed (exit $code)" }
 
     Say "Bootstrap complete: $TargetDir is a working Python environment."
 }
 finally {
     Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+    if ($uvCache) { Remove-Item -Recurse -Force $uvCache -ErrorAction SilentlyContinue }
 }

@@ -88,6 +88,10 @@ const guidanceEl = $<HTMLInputElement>("#guidance");
 const seedEl = $<HTMLInputElement>("#seed");
 const bootstrapPanelEl = $<HTMLDivElement>("#bootstrap-panel");
 const bootstrapConsoleEl = $<HTMLPreElement>("#bootstrap-console");
+const bootstrapTitleEl = $<HTMLSpanElement>("#bootstrap-title");
+const bootstrapStepEl = $<HTMLParagraphElement>("#bootstrap-step");
+const bootstrapFillEl = $<HTMLDivElement>("#bootstrap-fill");
+const bootstrapElapsedEl = $<HTMLParagraphElement>("#bootstrap-elapsed");
 const modelsPanelEl = $<HTMLDivElement>("#models-panel");
 const modelsInstallBtnEl = $<HTMLButtonElement>("#models-install-btn");
 const modelsInstallStatusEl = $<HTMLParagraphElement>("#models-install-status");
@@ -400,6 +404,15 @@ $<HTMLButtonElement>("#open-outputs-btn").addEventListener("click", async () => 
   }
 });
 
+// Purely cosmetic: the TV knobs turn a bit when clicked.
+document.querySelectorAll<HTMLButtonElement>(".tv-knob").forEach((knob) => {
+  let angle = 0;
+  knob.addEventListener("click", () => {
+    angle += 50 + Math.floor(Math.random() * 60);
+    knob.style.transform = "rotate(" + angle + "deg)";
+  });
+});
+
 // ---------------------------------------------------------------- engine startup
 let bootstrapLogOffset = 0;
 // Tails logs/bootstrap.log through the Rust side: the one phase with no HTTP
@@ -415,11 +428,56 @@ async function pollBootstrapLog(): Promise<boolean> {
   }
   if (newOffset < bootstrapLogOffset) bootstrapConsoleEl.textContent = "";
   bootstrapLogOffset = newOffset;
-  if (!text) return !bootstrapPanelEl.hidden;
-  bootstrapPanelEl.hidden = false;
+  if (!text) return bootstrapLogSeen;
+  bootstrapLogSeen = true;
   bootstrapConsoleEl.textContent += text;
   bootstrapConsoleEl.scrollTop = bootstrapConsoleEl.scrollHeight;
+  // Lines look like "[bootstrap] [4/5] Installing PyTorch ..." (see bootstrap_venv.ps1).
+  const steps = Array.from(text.matchAll(/\[(\d+)\/(\d+)\]\s*(.*)/g));
+  if (steps.length > 0) {
+    const last = steps[steps.length - 1];
+    bootstrapStep = { n: Number(last[1]), total: Number(last[2]), label: last[3].trim(), since: Date.now() };
+  }
+  if (/Bootstrap complete/.test(text)) bootstrapStep = { n: 0, total: 0, label: "Environment ready, starting the engine...", since: Date.now() };
   return true;
+}
+
+let bootstrapLogSeen = false;
+let bootstrapStep: { n: number; total: number; label: string; since: number } | null = null;
+// Rough share of the whole setup each step takes (PyTorch dominates). The bar
+// creeps toward the next step's start so it never looks frozen during the long ones.
+const STEP_START = [0, 0, 10, 14, 18, 82];
+const STEP_TAU_S = [0, 20, 15, 10, 150, 60];
+
+function renderStartup(startedAt: number) {
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  // Show the screen as soon as startup is visibly slow, or as soon as there is a log to show.
+  if (bootstrapLogSeen || elapsed >= 2) {
+    bootstrapPanelEl.hidden = false;
+    outputEmptyEl.hidden = true;
+  }
+  if (bootstrapLogSeen) {
+    bootstrapTitleEl.textContent = bootstrapStep && bootstrapStep.n > 0 ? "Setting up the Python environment" : "Starting the engine";
+    if (bootstrapStep && bootstrapStep.n > 0) {
+      bootstrapStepEl.textContent = "Step " + bootstrapStep.n + " / " + bootstrapStep.total + ": " + bootstrapStep.label;
+      const n = Math.min(bootstrapStep.n, STEP_START.length - 1);
+      const from = STEP_START[n];
+      const to = n + 1 < STEP_START.length ? STEP_START[n + 1] : 100;
+      const t = (Date.now() - bootstrapStep.since) / 1000;
+      bootstrapFillEl.style.width = from + (to - from) * (1 - Math.exp(-t / STEP_TAU_S[n])) + "%";
+    } else {
+      bootstrapStepEl.textContent = bootstrapStep ? bootstrapStep.label : "Starting...";
+      bootstrapFillEl.style.width = "100%";
+    }
+    bootstrapElapsedEl.textContent = "Elapsed " + mm + ":" + ss + ". First launch only, later launches skip this.";
+  } else {
+    bootstrapTitleEl.textContent = "Starting the engine";
+    bootstrapStepEl.textContent = "Loading Python and the API...";
+    bootstrapFillEl.style.width = Math.min(90, 100 * (1 - Math.exp(-elapsed / 8))) + "%";
+    bootstrapElapsedEl.textContent = "Elapsed " + mm + ":" + ss;
+  }
 }
 
 async function waitForEngine() {
@@ -429,6 +487,7 @@ async function waitForEngine() {
     try {
       await fetchJson("/health");
       bootstrapPanelEl.hidden = true;
+      outputEmptyEl.hidden = false;
       engineUp = true;
       setEngineStatus("Engine reachable", "status-ok");
       formats = await fetchJson("/formats");
@@ -439,6 +498,7 @@ async function waitForEngine() {
       return;
     } catch {
       const bootstrapping = await pollBootstrapLog();
+      renderStartup(start);
       if (!shownSlowHint && (bootstrapping || Date.now() - start > ENGINE_STARTUP_SLOW_HINT_MS)) {
         shownSlowHint = true;
         setEngineStatus(
@@ -476,8 +536,6 @@ async function refreshModels(): Promise<boolean> {
   modelsStatus = status;
   updateReduxUi();
   const keys = Object.keys(MODEL_CHECKBOXES) as Kind[];
-  // Only text-to-video is mandatory; the panel stays up until it is installed.
-  modelsPanelEl.hidden = modelDone(status.t2v) && modelDone(status.i2v) && pendingInstall.size === 0;
   keys.forEach((key) => {
     const cb = MODEL_CHECKBOXES[key];
     const done = modelDone(status[key]);
@@ -486,12 +544,6 @@ async function refreshModels(): Promise<boolean> {
     cb.parentElement!.classList.toggle("models-row-done", done);
     MODEL_PROGRESS[key].textContent = done ? "done" : status[key].progress ?? "";
   });
-  // Optional I2V does not need to nag once T2V is in: collapse the panel after
-  // T2V is ready, unless a download is still running or something failed.
-  if (modelDone(status.t2v) && pendingInstall.size === 0 && !status.i2v.installing) {
-    modelsPanelEl.hidden = true;
-  }
-
   if (pendingInstall.size > 0) {
     const failed = Array.from(pendingInstall).filter((k) => !status[k].installing && !modelDone(status[k]));
     modelsInstallStatusEl.hidden = failed.length === 0;
@@ -504,6 +556,14 @@ async function refreshModels(): Promise<boolean> {
       if (!anyFailed) void warmupIfReady();
     }
   }
+  // Decided last, once pendingInstall has been settled above: only text-to-video
+  // is mandatory, so the panel collapses as soon as it is installed, unless a
+  // download is still running or a failure message is waiting to be read.
+  modelsPanelEl.hidden =
+    modelDone(status.t2v) &&
+    pendingInstall.size === 0 &&
+    !status.i2v.installing &&
+    modelsInstallStatusEl.hidden;
   updateGenerateEnabled();
   updateEmptyHint();
   return modelDone(status.t2v);
@@ -634,6 +694,7 @@ function renderProgress(job: JobSnapshot) {
 
 function setGenerating(on: boolean) {
   generating = on;
+  $<HTMLDivElement>("#tv-led").classList.toggle("on", on);
   generateBtn.hidden = on;
   abortBtn.hidden = !on;
   progressWrapEl.hidden = !on && jobLogEl.hidden;
