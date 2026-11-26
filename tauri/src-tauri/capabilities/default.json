@@ -1,14 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main window: native save dialog + writing the chosen file (used by the Download buttons to save a generated image/sketch to disk, since a plain <a download> click doesn't trigger a real save inside the WebView2 shell).",
+  "description": "Capabilities for the main window. Deliberately minimal: no file-system or dialog access from the webview (everything that touches disk goes through the commands in main.rs).",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
-    "dialog:default",
-    "fs:default",
-    "fs:allow-write-file"
+    "core:default"
   ]
 }

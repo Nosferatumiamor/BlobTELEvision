@@ -7,6 +7,7 @@ and the frontend (tauri/src/main.ts) calls it directly over HTTP.
 import argparse
 import mimetypes
 import os
+import re
 import shutil
 import sys
 import threading
@@ -47,7 +48,30 @@ import blobtv_post
 API_PORT_DEFAULT = 8421
 
 app = FastAPI(title="BlobTELEvision API", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# The API only listens on 127.0.0.1, but any web page the user visits can still make their browser
+# talk to it. Only the app's own webview (Tauri: http(s)://tauri.localhost) and local dev servers
+# (http://localhost:<port>) are allowed to call it or to read its answers.
+_ALLOWED_ORIGIN_RE = r"^(https?://tauri\.localhost|tauri://localhost|http://(localhost|127\.0\.0\.1)(:\d+)?)$"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=_ALLOWED_ORIGIN_RE,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def _reject_foreign_origins(request, call_next):
+    # CORS only hides the answer: a "simple" cross-site POST (e.g. /shutdown) is still executed.
+    # Browsers always send Origin on those, so refuse state-changing calls from other sites.
+    # Calls with no Origin (the Rust shell, curl) are unaffected.
+    origin = request.headers.get("origin")
+    if origin and request.method not in ("GET", "HEAD", "OPTIONS") and not re.match(_ALLOWED_ORIGIN_RE, origin):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
+    return await call_next(request)
 
 # "Fast reboot" (main.rs) can leave this process alive after the window closes
 # so a later launch reconnects instead of paying the cold-load cost again. This

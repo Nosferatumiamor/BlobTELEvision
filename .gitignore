@@ -41,3 +41,11 @@ tauri/node_modules/
 tauri/dist/
 tauri/src-tauri/target/
 tauri/src-tauri/gen/
+
+# Never commit credentials or signing material
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12

@@ -22,7 +22,8 @@ No test suite, linter or CI. Dev setup mirrors BlobVision:
 ```
 BlobTELEvision-Dev.bat                 # npm run tauri dev (recompiles Rust each launch)
 BlobTELEvision.bat                     # runs tauri/src-tauri/target/release/blobtelevision.exe
-cd tauri && npm run tauri build        # release exe + NSIS installer (target/release/bundle/nsis/)
+Build-Installer.bat                    # release exe + NSIS installer (target/release/bundle/nsis/), privacy-scrubbed
+cd tauri && npm run tauri build        # same build WITHOUT the scrub: never publish its output
 venv\Scripts\python.exe app\python\blobtv_api.py --port 8421    # backend alone (Swagger at /docs)
 cd tauri && npx vite --host 127.0.0.1   # frontend alone in a browser, against a running backend
 ```
@@ -68,6 +69,16 @@ Type-check the frontend with `npx tsc --noEmit` from `tauri/`.
   The page must not scroll: the screen width in `#output-box` and `.side-col` max-height both reserve the other elements' height in rem.
 
 ## Conventions and gotchas
+
+- **Publishing hygiene.** `Build-Installer.ps1` deletes `__pycache__` (a .pyc embeds the absolute path of its source),
+  remaps rustc's source paths (`CARGO_ENCODED_RUSTFLAGS`, `/PDBALTPATH`) and then scans the exe and the bundled `app/`
+  for the user name, profile folder and repo folder, failing if any is found. A plain `tauri build` leaks the cargo
+  registry path (with the user name) into the exe. Keep personal paths out of committed files too.
+- **Local API hardening.** The engine only listens on 127.0.0.1, CORS only allows the Tauri origin
+  (`http(s)://tauri.localhost`, `tauri://localhost`) and `localhost:<port>` dev servers, and state-changing requests
+  carrying a foreign `Origin` header get a 403 (`_reject_foreign_origins` in `blobtv_api.py`), so a web page the user
+  visits cannot drive it. Requests without `Origin` (the Rust shell, curl) are unaffected. The webview has no
+  fs/dialog plugin: everything touching the disk goes through the commands in `main.rs`.
 
 - Weights live in `models/modelscope-t2v` and `models/i2vgen-xl`, installed via the in-app button. A
   `.blobtv_complete` marker file (written after a finished `snapshot_download`) is what counts as "installed".
